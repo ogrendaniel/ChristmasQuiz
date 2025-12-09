@@ -62,13 +62,13 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
       }
       
       const data = await response.json();
+      setSubmitting(false); // Clear submitting state immediately
       setResult(data);
       setShowResult(true);
     } catch (error) {
       console.error('Error submitting answer:', error);
       alert(error.message);
-    } finally {
-      setSubmitting(false);
+      setSubmitting(false); // Also clear on error
     }
   };
 
@@ -172,17 +172,12 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
                 {submitting ? (
                   <>
                     <span className="spinner"></span>
-                    Checking answer with AI...
+                    Submitting...
                   </>
                 ) : (
                   'Submit Answer'
                 )}
               </button>
-              {submitting && (
-                <p className="ai-checking-message">
-                  🤖 AI is analyzing your answer...
-                </p>
-              )}
             </form>
           )}
         </div>

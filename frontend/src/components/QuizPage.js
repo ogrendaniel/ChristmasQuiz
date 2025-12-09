@@ -7,6 +7,7 @@ function QuizPage({ quizData, playerData, isHost }) {
   const [selectedDay, setSelectedDay] = useState(null);
   const [answeredQuestions, setAnsweredQuestions] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [lockedDayError, setLockedDayError] = useState(null);
   
   // Create array of numbers 1-24 and shuffle only once using useMemo
   const shuffledDays = useMemo(() => {
@@ -81,7 +82,7 @@ function QuizPage({ quizData, playerData, isHost }) {
     
     // Check if player can access this day (must complete previous days)
     if (day > 1 && !answeredQuestions.includes(day - 1)) {
-      alert(`You must complete day ${day - 1} before accessing day ${day}!`);
+      setLockedDayError({ day, requiredDay: day - 1 });
       return;
     }
     
@@ -129,6 +130,25 @@ function QuizPage({ quizData, playerData, isHost }) {
     <div className="quiz-page advent-calendar">
       {/* Snowflakes overlay */}
       <div className="snow-overlay"></div>
+      
+      {/* Locked Day Error Popup */}
+      {lockedDayError && (
+        <div className="locked-day-overlay" onClick={() => setLockedDayError(null)}>
+          <div className="locked-day-popup" onClick={(e) => e.stopPropagation()}>
+            <div className="locked-icon">🔒</div>
+            <h2>Day {lockedDayError.day} is Locked!</h2>
+            <p className="locked-message">
+              You must complete <strong>Day {lockedDayError.requiredDay}</strong> before accessing Day {lockedDayError.day}.
+            </p>
+            <p className="locked-hint">
+              Complete the previous days in order to unlock more questions! 🎄
+            </p>
+            <button className="locked-close-btn" onClick={() => setLockedDayError(null)}>
+              Got it!
+            </button>
+          </div>
+        </div>
+      )}
       
       <div className="calendar-header">
         <h1>🎄 Christmas Advent Quiz Calendar 🎄</h1>

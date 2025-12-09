@@ -252,15 +252,26 @@ def check_answer_with_ai(player_answer: str, correct_answer: str) -> dict:
     Use Ollama to check if player's answer matches the correct answer.
     Returns dict with: is_match (bool), confidence (int 0-100), reasoning (str), method (str)
     """
+    # First, check for exact match (fast path)
+    is_exact = player_answer.strip().lower() == correct_answer.strip().lower()
+    if is_exact:
+        print(f"✓ EXACT MATCH - Player: '{player_answer}' | Correct: '{correct_answer}'")
+        return {
+            "is_match": True,
+            "confidence": 100,
+            "reasoning": "Exact match",
+            "method": "exact"
+        }
+    
+    # Not an exact match - check if AI is enabled
     print(f"AI CHECK - Player: '{player_answer}' | Correct: '{correct_answer}' | USE_OLLAMA: {USE_OLLAMA}")
     
     if not USE_OLLAMA:
-        # Fallback to exact match if Ollama is disabled
-        is_exact = player_answer.strip().lower() == correct_answer.strip().lower()
+        # Ollama is disabled, return no match
         return {
-            "is_match": is_exact,
-            "confidence": 100 if is_exact else 0,
-            "reasoning": "Exact match" if is_exact else "No exact match",
+            "is_match": False,
+            "confidence": 0,
+            "reasoning": "No exact match (AI disabled)",
             "method": "exact"
         }
     
@@ -932,11 +943,16 @@ def get_quiz_history(user_data: dict = Depends(verify_token)):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    # Get the total number of questions available
+    cursor.execute("SELECT COUNT(*) FROM questions")
+    total_questions = cursor.fetchone()[0]
+    
     cursor.execute("""
         SELECT q.id, q.created_at, q.started, q.completed,
                COUNT(DISTINCT p.id) as player_count,
                MAX(p.score) as top_score,
-               cqs.name as question_set_name
+               cqs.name as question_set_name,
+               q.question_set_id
         FROM quizzes q
         LEFT JOIN players p ON q.id = p.quiz_id
         LEFT JOIN custom_question_sets cqs ON q.question_set_id = cqs.id
@@ -946,22 +962,76 @@ def get_quiz_history(user_data: dict = Depends(verify_token)):
     """, (user_data["user_id"],))
     
     rows = cursor.fetchall()
-    conn.close()
     
-    quizzes = [
-        {
+    quizzes = []
+    for row in rows:
+        quiz_id = row[0]
+        player_count = row[4]
+        question_set_id = row[7]
+        
+        # Determine number of questions for this quiz
+        if question_set_id:
+            cursor.execute("SELECT COUNT(*) FROM custom_questions WHERE question_set_id = ?", (question_set_id,))
+            num_questions = cursor.fetchone()[0]
+        else:
+            num_questions = total_questions
+        
+        # Check if all players have answered all questions
+        all_completed = False
+        if player_count > 0 and num_questions > 0:
+            cursor.execute("""
+                SELECT COUNT(*) FROM players p
+                WHERE p.quiz_id = ?
+                AND (SELECT COUNT(*) FROM player_answers WHERE player_id = p.id AND quiz_id = p.quiz_id) = ?
+            """, (quiz_id, num_questions))
+            completed_players = cursor.fetchone()[0]
+            all_completed = completed_players == player_count
+        
+        quizzes.append({
             "quiz_id": row[0],
             "created_at": row[1],
             "started": bool(row[2]),
             "completed": bool(row[3]),
-            "player_count": row[4],
+            "player_count": player_count,
             "top_score": row[5] or 0,
-            "question_set_name": row[6] or "Standard Questions"
-        }
-        for row in rows
-    ]
+            "question_set_name": row[6] or "Standard Questions",
+            "all_completed": all_completed
+        })
     
+    conn.close()
     return {"quizzes": quizzes}
+
+@app.delete("/api/quiz/{quiz_id}")
+def delete_quiz(quiz_id: str, user_data: dict = Depends(verify_token)):
+    """Delete a quiz and all associated data"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Verify the quiz belongs to the user
+    cursor.execute("""
+        SELECT id FROM quizzes WHERE id = ? AND user_id = ?
+    """, (quiz_id, user_data["user_id"]))
+    
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Quiz not found"
+        )
+    
+    # Delete all player answers for this quiz
+    cursor.execute("DELETE FROM player_answers WHERE quiz_id = ?", (quiz_id,))
+    
+    # Delete all players for this quiz
+    cursor.execute("DELETE FROM players WHERE quiz_id = ?", (quiz_id,))
+    
+    # Delete the quiz itself
+    cursor.execute("DELETE FROM quizzes WHERE id = ?", (quiz_id,))
+    
+    conn.commit()
+    conn.close()
+    
+    return {"message": "Quiz deleted successfully"}
 
 @app.get("/api/quiz/{quiz_id}/results")
 def get_quiz_results(quiz_id: str, user_data: dict = Depends(verify_token)):

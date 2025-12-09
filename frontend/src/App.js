@@ -65,18 +65,26 @@ function App() {
         const data = await response.json();
         setUserData(data);
         
-        // Check if returning to a hosted quiz
+        // Check if returning to a hosted quiz AND the URL matches
         const savedQuizData = localStorage.getItem('quizData');
         const savedIsHost = localStorage.getItem('isHost');
+        const hostMatch = path.match(/^\/host\/([a-zA-Z0-9]+)$/);
         
-        if (savedIsHost === 'true' && savedQuizData) {
+        if (savedIsHost === 'true' && savedQuizData && hostMatch) {
           const quizInfo = JSON.parse(savedQuizData);
-          setQuizData(quizInfo);
-          setIsHost(true);
-          window.history.pushState({}, '', `/host/${quizInfo.quiz_id}`);
-          setPage('quiz');
+          // Only restore if the URL quiz ID matches the saved quiz ID
+          if (quizInfo.quiz_id === hostMatch[1]) {
+            setQuizData(quizInfo);
+            setIsHost(true);
+            setPage('quiz');
+          } else {
+            // URL doesn't match saved quiz, go to dashboard
+            setPage('dashboard');
+            window.history.pushState({}, '', '/');
+          }
         } else {
           setPage('dashboard');
+          window.history.pushState({}, '', '/');
         }
       } else {
         // Token invalid, clear and show login

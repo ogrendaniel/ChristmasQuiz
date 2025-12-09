@@ -151,6 +151,31 @@ function QuizHistory({ onBack }) {
     setTempPoints('');
   };
 
+  const deleteQuiz = async (quizId) => {
+    if (!window.confirm('Are you sure you want to delete this quiz? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await fetchAuthAPI(`${API_URL}/api/quiz/${quizId}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        // Remove from local state
+        setQuizzes(prev => prev.filter(q => q.quiz_id !== quizId));
+        if (selectedQuiz === quizId) {
+          closeResults();
+        }
+      } else {
+        setError('Failed to delete quiz');
+      }
+    } catch (err) {
+      console.error('Error deleting quiz:', err);
+      setError('Failed to delete quiz');
+    }
+  };
+
   const saveAnswerPoints = async (playerId, dayNumber, currentlyCorrect) => {
     const newPoints = parseInt(tempPoints);
     if (isNaN(newPoints) || newPoints < 0) {
@@ -254,7 +279,16 @@ function QuizHistory({ onBack }) {
                         <span className={`badge ${quiz.started ? 'started' : 'not-started'}`}>
                           {quiz.started ? '✓ Started' : '⏳ Not Started'}
                         </span>
-                        {quiz.completed && <span className="badge completed">✓ Completed</span>}
+                        {quiz.all_completed && (
+                          <span className="badge all-completed">🎉 All Players Done</span>
+                        )}
+                        <button 
+                          className="delete-quiz-btn"
+                          onClick={() => deleteQuiz(quiz.quiz_id)}
+                          title="Delete this quiz"
+                        >
+                          🗑️
+                        </button>
                       </div>
                     </div>
 
