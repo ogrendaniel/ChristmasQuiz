@@ -1,7 +1,6 @@
 /* Advent Calendar Styles */
 .advent-calendar {
-  height: 100vh;
-  overflow: hidden;
+  min-height: 100vh;
   background-color: #0a0505;
   background-image: url('../assets/Christmas_Background.png');
   background-position: center center;
@@ -12,6 +11,22 @@
   position: relative;
   display: flex;
   flex-direction: column;
+}
+
+/* Desktop - prevent scrolling, fit everything on screen */
+@media (min-width: 1025px) {
+  .advent-calendar {
+    height: 100vh;
+    overflow: hidden;
+    padding: 10px 15px;
+  }
+}
+
+/* Mobile/Tablet - allow scrolling */
+@media (max-width: 1024px) {
+  .advent-calendar {
+    overflow-y: auto;
+  }
 }
 
 /* Dark overlay for better contrast */
@@ -67,6 +82,13 @@
   flex-shrink: 0;
 }
 
+/* Desktop - compact header */
+@media (min-width: 1025px) {
+  .calendar-header {
+    margin-bottom: 5px;
+  }
+}
+
 .calendar-header h1 {
   color: #fff;
   font-size: 2.5em;
@@ -77,6 +99,14 @@
     0 0 50px rgba(255, 100, 100, 0.3);
   font-family: Georgia, serif;
   letter-spacing: 2px;
+}
+
+/* Desktop - smaller title */
+@media (min-width: 1025px) {
+  .calendar-header h1 {
+    font-size: 2em;
+    margin: 0 0 3px 0;
+  }
 }
 
 .calendar-header h1::before {
@@ -95,11 +125,27 @@
   font-style: italic;
 }
 
+/* Desktop - smaller subtitle */
+@media (min-width: 1025px) {
+  .calendar-header .subtitle {
+    font-size: 0.95em;
+    margin: 3px 0;
+  }
+}
+
 .calendar-header .role-info {
   color: #d4af37;
   font-size: 0.9em;
   margin: 5px 0;
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* Desktop - smaller role info */
+@media (min-width: 1025px) {
+  .calendar-header .role-info {
+    font-size: 0.85em;
+    margin: 3px 0;
+  }
 }
 
 .calendar-header .role-info strong {
@@ -120,6 +166,14 @@
   max-width: 1600px;
   margin: 0 auto;
   width: 100%;
+  min-height: 0; /* Allow flex item to shrink */
+}
+
+/* Desktop - make grid and leaderboard fit together */
+@media (min-width: 1025px) {
+  .quiz-content-wrapper {
+    overflow: hidden;
+  }
 }
 
 /* Advent Grid - Maximized screen usage */
@@ -132,10 +186,25 @@
   align-content: center;
 }
 
+/* Desktop optimization - ensure grid fits on screen */
+@media (min-width: 1025px) and (max-width: 1400px) {
+  .advent-grid {
+    gap: 10px;
+    max-width: 800px;
+  }
+}
+
+@media (min-width: 1025px) and (max-height: 800px) {
+  .advent-grid {
+    gap: 8px;
+  }
+}
+
 @media (max-width: 1024px) {
   .quiz-content-wrapper {
     flex-direction: column;
     align-items: center;
+    overflow-y: visible;
   }
   
   .leaderboard-container {
@@ -156,6 +225,13 @@
   .advent-grid {
     grid-template-columns: repeat(3, 1fr);
     gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .advent-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
   }
 }
 
@@ -327,11 +403,31 @@
   line-height: 1;
 }
 
+/* Desktop - adjust number size for smaller boxes */
+@media (min-width: 1025px) and (max-width: 1400px) {
+  .door-number {
+    font-size: 2.4em;
+  }
+}
+
+@media (min-width: 1025px) and (max-height: 800px) {
+  .door-number {
+    font-size: 2.2em;
+  }
+}
+
 .door-decoration {
   font-size: 1.4em;
   opacity: 0.95;
   filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.9));
   animation: gentleTwinkle 3s ease-in-out infinite;
+}
+
+/* Desktop - adjust decoration size */
+@media (min-width: 1025px) and (max-height: 800px) {
+  .door-decoration {
+    font-size: 1.2em;
+  }
 }
 
 @keyframes gentleTwinkle {
@@ -356,10 +452,25 @@
   flex-shrink: 0;
 }
 
+/* Desktop - compact footer */
+@media (min-width: 1025px) {
+  .calendar-footer {
+    margin-top: 5px;
+  }
+}
+
 .calendar-footer p {
   margin: 3px 0;
   font-size: 1em;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9);
+}
+
+/* Desktop - smaller footer text */
+@media (min-width: 1025px) {
+  .calendar-footer p {
+    margin: 2px 0;
+    font-size: 0.9em;
+  }
 }
 
 .calendar-footer p::before {
@@ -370,6 +481,13 @@
   font-size: 0.85em;
   opacity: 0.9;
   font-style: italic;
+}
+
+/* Desktop - smaller instruction text */
+@media (min-width: 1025px) {
+  .calendar-footer .instruction {
+    font-size: 0.8em;
+  }
 }
 
 .calendar-footer .instruction::before {
@@ -684,12 +802,40 @@
   flex-shrink: 0;
 }
 
+/* Desktop - optimize leaderboard size */
+@media (min-width: 1025px) {
+  .leaderboard-container {
+    width: 280px;
+    min-width: 280px;
+    padding: 15px;
+    max-height: calc(100vh - 150px);
+    align-self: stretch;
+  }
+}
+
+/* Smaller screens - reduce leaderboard width */
+@media (min-width: 1025px) and (max-width: 1300px) {
+  .leaderboard-container {
+    width: 250px;
+    min-width: 250px;
+    padding: 12px;
+  }
+}
+
 .leaderboard-container h2 {
   text-align: center;
   margin: 0 0 15px 0;
   color: #d4af37;
   font-size: 1.8em;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Desktop - smaller leaderboard title */
+@media (min-width: 1025px) {
+  .leaderboard-container h2 {
+    font-size: 1.5em;
+    margin: 0 0 10px 0;
+  }
 }
 
 .leaderboard {
