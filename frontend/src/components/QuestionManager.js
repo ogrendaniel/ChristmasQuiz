@@ -175,6 +175,32 @@ function QuestionManager({ onBack }) {
     setEditingQuestion(null);
   };
 
+  const handleDeleteQuestion = async (dayNumber) => {
+    if (!window.confirm(`Are you sure you want to delete the question for Day ${dayNumber}?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetchAuthAPI(
+        `${API_URL}/api/question-sets/${selectedSet.id}/questions/${dayNumber}`,
+        {
+          method: 'DELETE'
+        }
+      );
+
+      if (response.ok) {
+        await fetchQuestions(selectedSet.id);
+        await fetchQuestionSets(); // Refresh to update question count
+      } else {
+        const errorData = await response.json();
+        setError(errorData.detail || 'Failed to delete question');
+      }
+    } catch (err) {
+      console.error('Error deleting question:', err);
+      setError('Failed to delete question');
+    }
+  };
+
   const getAvailableDays = () => {
     const usedDays = questions.map(q => q.day_number);
     const allDays = Array.from({ length: 24 }, (_, i) => i + 1);
@@ -290,7 +316,13 @@ function QuestionManager({ onBack }) {
                   <h2>Questions for "{selectedSet.name}"</h2>
                   <button 
                     className="add-question-button"
-                    onClick={() => setShowQuestionForm(!showQuestionForm)}
+                    onClick={() => {
+                      const availableDays = getAvailableDays();
+                      if (availableDays.length > 0) {
+                        setQuestionForm({...questionForm, day_number: availableDays[0]});
+                      }
+                      setShowQuestionForm(!showQuestionForm);
+                    }}
                     disabled={questions.length >= 24}
                   >
                     + Add Question
@@ -364,7 +396,16 @@ function QuestionManager({ onBack }) {
                     <div className="questions-grid">
                       {questions.sort((a, b) => a.day_number - b.day_number).map(q => (
                         <div key={q.id} className="question-card">
-                          <div className="question-day">Day {q.day_number}</div>
+                          <div className="question-card-header">
+                            <div className="question-day">Day {q.day_number}</div>
+                            <button 
+                              className="delete-question-btn"
+                              onClick={() => handleDeleteQuestion(q.day_number)}
+                              title="Delete this question"
+                            >
+                              🗑️
+                            </button>
+                          </div>
                           <div className="question-text">{q.question_text}</div>
                           <div className="question-answer">
                             <strong>Answer:</strong> {q.correct_answer}

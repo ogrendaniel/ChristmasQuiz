@@ -650,6 +650,20 @@ def create_custom_question(set_id: str, question: Question, user_data: dict = De
             detail="Question set not found"
         )
     
+    # Check if question already exists for this day
+    cursor.execute("""
+        SELECT id, question_text FROM custom_questions 
+        WHERE question_set_id = ? AND day_number = ?
+    """, (set_id, question.day_number))
+    
+    existing = cursor.fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Question for day {question.day_number} already exists in this set (ID: {existing[0]}). Delete it first or choose a different day."
+        )
+    
     try:
         cursor.execute("""
             INSERT INTO custom_questions 
@@ -663,11 +677,11 @@ def create_custom_question(set_id: str, question: Question, user_data: dict = De
         conn.close()
         
         return {"message": "Custom question created", "id": question_id}
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as e:
         conn.close()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Question for this day already exists in this set"
+            detail=f"Database constraint error: {str(e)}"
         )
 
 @app.get("/api/question-sets/{set_id}/questions")
@@ -710,6 +724,42 @@ def get_custom_questions(set_id: str, user_data: dict = Depends(verify_token)):
     ]
     
     return {"questions": questions}
+
+@app.delete("/api/question-sets/{set_id}/questions/{day_number}")
+def delete_custom_question(set_id: str, day_number: int, user_data: dict = Depends(verify_token)):
+    """Delete a specific question from a custom question set"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Verify the question set belongs to the user
+    cursor.execute("""
+        SELECT id FROM custom_question_sets WHERE id = ? AND user_id = ?
+    """, (set_id, user_data["user_id"]))
+    
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Question set not found"
+        )
+    
+    # Delete the question
+    cursor.execute("""
+        DELETE FROM custom_questions 
+        WHERE question_set_id = ? AND day_number = ?
+    """, (set_id, day_number))
+    
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Question for day {day_number} not found in this set"
+        )
+    
+    conn.commit()
+    conn.close()
+    
+    return {"message": f"Question for day {day_number} deleted successfully"}
 
 @app.delete("/api/question-sets/{set_id}")
 def delete_question_set(set_id: str, user_data: dict = Depends(verify_token)):
