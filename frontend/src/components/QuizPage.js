@@ -6,6 +6,7 @@ import { API_URL, fetchAPI } from '../config';
 function QuizPage({ quizData, playerData, isHost }) {
   const [selectedDay, setSelectedDay] = useState(null);
   const [answeredQuestions, setAnsweredQuestions] = useState([]);
+  const [leaderboard, setLeaderboard] = useState([]);
   
   // Create array of numbers 1-24 and shuffle only once using useMemo
   const shuffledDays = useMemo(() => {
@@ -19,6 +20,15 @@ function QuizPage({ quizData, playerData, isHost }) {
       fetchAnsweredQuestions();
     }
   }, [isHost, playerData]);
+
+  useEffect(() => {
+    // Fetch leaderboard immediately on mount
+    fetchLeaderboard();
+    
+    // Poll leaderboard every 5 seconds
+    const interval = setInterval(fetchLeaderboard, 5000);
+    return () => clearInterval(interval);
+  }, [quizData, playerData]);
 
   const fetchAnsweredQuestions = async () => {
     try {
@@ -39,6 +49,24 @@ function QuizPage({ quizData, playerData, isHost }) {
     }
   };
 
+  const fetchLeaderboard = async () => {
+    try {
+      const quizId = quizData?.quiz_id || playerData?.quiz_id;
+      if (!quizId) return;
+      
+      const response = await fetchAPI(
+        `${API_URL}/api/quiz/${quizId}/leaderboard`
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setLeaderboard(data.leaderboard);
+      }
+    } catch (error) {
+      console.error('Error fetching leaderboard:', error);
+    }
+  };
+
   const handleDayClick = (day) => {
     // If player and question already answered, don't allow click
     if (!isHost && answeredQuestions.includes(day)) {
@@ -53,6 +81,8 @@ function QuizPage({ quizData, playerData, isHost }) {
     if (!isHost && playerData) {
       fetchAnsweredQuestions();
     }
+    // Refresh leaderboard immediately
+    fetchLeaderboard();
   };
 
   const isDayAnswered = (day) => {
@@ -86,21 +116,41 @@ function QuizPage({ quizData, playerData, isHost }) {
         )}
       </div>
 
-      <div className="advent-grid">
-        {shuffledDays.map((day) => (
-          <div 
-            key={day} 
-            className={`advent-door ${isDayAnswered(day) ? 'answered' : ''}`}
-            onClick={() => handleDayClick(day)}
-          >
-            <div className="door-content">
-              <div className="door-number">{day}</div>
-              <div className="door-decoration">
-                {isDayAnswered(day) ? '✓' : '❄️'}
-              </div>
+      <div className="quiz-content-wrapper">
+        {/* Leaderboard */}
+        {leaderboard.length > 0 && (
+          <div className="leaderboard-container">
+            <h2>🏆 Leaderboard</h2>
+            <div className="leaderboard">
+              {leaderboard.map((entry, index) => (
+                <div 
+                  key={entry.player_id} 
+                  className={`leaderboard-entry ${index === 0 ? 'first-place' : ''} ${entry.player_id === (playerData?.player_id || playerData?.id) ? 'current-player' : ''}`}
+                >
+                  <span className="rank">#{entry.rank}</span>
+                  <span className="username">{entry.username}</span>
+                  <span className="score">{entry.score} pts</span>
+                </div>
+              ))}
             </div>
           </div>
-        ))}
+        )}
+
+        <div className="advent-grid">{shuffledDays.map((day) => (
+            <div 
+              key={day} 
+              className={`advent-door ${isDayAnswered(day) ? 'answered' : ''}`}
+              onClick={() => handleDayClick(day)}
+            >
+              <div className="door-content">
+                <div className="door-number">{day}</div>
+                <div className="door-decoration">
+                  {isDayAnswered(day) ? '✓' : '❄️'}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="calendar-footer">

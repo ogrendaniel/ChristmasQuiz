@@ -54,6 +54,29 @@ def init_db():
         )
     """)
     
+    # Create quizzes table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS quizzes (
+            id TEXT PRIMARY KEY,
+            host_id TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started BOOLEAN DEFAULT 0
+        )
+    """)
+    
+    # Create players table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS players (
+            id TEXT PRIMARY KEY,
+            quiz_id TEXT NOT NULL,
+            username TEXT NOT NULL,
+            score INTEGER DEFAULT 0,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (quiz_id) REFERENCES quizzes(id),
+            UNIQUE(quiz_id, username)
+        )
+    """)
+    
     # Create player_answers table to track which questions players have answered
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS player_answers (
@@ -65,6 +88,7 @@ def init_db():
             is_correct BOOLEAN NOT NULL,
             points_earned INTEGER NOT NULL,
             answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (player_id) REFERENCES players(id),
             UNIQUE(player_id, quiz_id, day_number)
         )
     """)
@@ -74,10 +98,6 @@ def init_db():
 
 # Initialize database on startup
 init_db()
-
-# In-memory storage (replace with database in production)
-quizzes = {}
-players = {}
 
 class Player(BaseModel):
     username: str
@@ -112,51 +132,85 @@ def root():
 def create_quiz():
     """Create a new quiz and return unique quiz ID"""
     quiz_id = str(uuid.uuid4())[:8]  # Short unique ID
-    quizzes[quiz_id] = {
-        "id": quiz_id,
-        "host_id": str(uuid.uuid4()),
-        "created_at": datetime.now(),
-        "started": False,
-        "players": []
-    }
+    host_id = str(uuid.uuid4())
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        INSERT INTO quizzes (id, host_id, created_at, started)
+        VALUES (?, ?, ?, 0)
+    """, (quiz_id, host_id, datetime.now()))
+    
+    conn.commit()
+    conn.close()
+    
     return {
         "quiz_id": quiz_id,
-        "host_id": quizzes[quiz_id]["host_id"],
+        "host_id": host_id,
         "join_link": f"{FRONTEND_URL}/join/{quiz_id}"
     }
 
 @app.get("/api/quiz/{quiz_id}")
 def get_quiz(quiz_id: str):
     """Get quiz details"""
-    if quiz_id not in quizzes:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT id, host_id, created_at, started
+        FROM quizzes WHERE id = ?
+    """, (quiz_id,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
         raise HTTPException(status_code=404, detail="Quiz not found")
-    return quizzes[quiz_id]
+    
+    return {
+        "id": row[0],
+        "host_id": row[1],
+        "created_at": row[2],
+        "started": bool(row[3])
+    }
 
 @app.post("/api/quiz/{quiz_id}/join")
 def join_quiz(quiz_id: str, player: Player):
     """Add a player to the quiz"""
-    if quiz_id not in quizzes:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Check if quiz exists
+    cursor.execute("SELECT started FROM quizzes WHERE id = ?", (quiz_id,))
+    quiz_row = cursor.fetchone()
+    
+    if not quiz_row:
+        conn.close()
         raise HTTPException(status_code=404, detail="Quiz not found")
     
-    quiz = quizzes[quiz_id]
-    
-    if quiz["started"]:
+    if quiz_row[0]:  # started is True
+        conn.close()
         raise HTTPException(status_code=400, detail="Quiz already started")
     
     # Check if username already exists in this quiz
-    if any(p["username"] == player.username for p in quiz["players"]):
+    cursor.execute("""
+        SELECT id FROM players WHERE quiz_id = ? AND username = ?
+    """, (quiz_id, player.username))
+    
+    if cursor.fetchone():
+        conn.close()
         raise HTTPException(status_code=400, detail="Username already taken")
     
     player_id = str(uuid.uuid4())
-    player_data = {
-        "id": player_id,
-        "username": player.username,
-        "score": 0,
-        "joined_at": datetime.now().isoformat()
-    }
     
-    quiz["players"].append(player_data)
-    players[player_id] = {**player_data, "quiz_id": quiz_id}
+    cursor.execute("""
+        INSERT INTO players (id, quiz_id, username, score, joined_at)
+        VALUES (?, ?, ?, 0, ?)
+    """, (player_id, quiz_id, player.username, datetime.now().isoformat()))
+    
+    conn.commit()
+    conn.close()
     
     return {
         "player_id": player_id,
@@ -167,41 +221,124 @@ def join_quiz(quiz_id: str, player: Player):
 @app.get("/api/quiz/{quiz_id}/players")
 def get_players(quiz_id: str):
     """Get all players in a quiz"""
-    if quiz_id not in quizzes:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Check if quiz exists
+    cursor.execute("SELECT id FROM quizzes WHERE id = ?", (quiz_id,))
+    if not cursor.fetchone():
+        conn.close()
         raise HTTPException(status_code=404, detail="Quiz not found")
-    return {"players": quizzes[quiz_id]["players"]}
+    
+    # Get all players
+    cursor.execute("""
+        SELECT id, username, score, joined_at
+        FROM players WHERE quiz_id = ?
+        ORDER BY joined_at
+    """, (quiz_id,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    players = [
+        {
+            "id": row[0],
+            "username": row[1],
+            "score": row[2],
+            "joined_at": row[3]
+        }
+        for row in rows
+    ]
+    
+    return {"players": players}
+
+@app.get("/api/quiz/{quiz_id}/leaderboard")
+def get_leaderboard(quiz_id: str):
+    """Get leaderboard for a quiz with players ranked by score"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Check if quiz exists
+    cursor.execute("SELECT id FROM quizzes WHERE id = ?", (quiz_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    
+    # Get all players ranked by score (highest first)
+    cursor.execute("""
+        SELECT id, username, score
+        FROM players WHERE quiz_id = ?
+        ORDER BY score DESC, joined_at ASC
+    """, (quiz_id,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    leaderboard = []
+    current_rank = 1
+    for idx, row in enumerate(rows):
+        leaderboard.append({
+            "rank": current_rank,
+            "player_id": row[0],
+            "username": row[1],
+            "score": row[2]
+        })
+        # Only increment rank if next player has different score
+        if idx + 1 < len(rows) and rows[idx + 1][2] != row[2]:
+            current_rank = idx + 2
+    
+    return {"leaderboard": leaderboard}
 
 @app.post("/api/quiz/{quiz_id}/start")
 def start_quiz(quiz_id: str, host_id: str):
     """Start the quiz (only host can start)"""
-    if quiz_id not in quizzes:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Get quiz details
+    cursor.execute("""
+        SELECT host_id, started FROM quizzes WHERE id = ?
+    """, (quiz_id,))
+    
+    quiz_row = cursor.fetchone()
+    
+    if not quiz_row:
+        conn.close()
         raise HTTPException(status_code=404, detail="Quiz not found")
     
-    quiz = quizzes[quiz_id]
-    
-    if quiz["host_id"] != host_id:
+    if quiz_row[0] != host_id:
+        conn.close()
         raise HTTPException(status_code=403, detail="Only host can start the quiz")
     
-    if len(quiz["players"]) == 0:
+    # Check if there are players
+    cursor.execute("SELECT COUNT(*) FROM players WHERE quiz_id = ?", (quiz_id,))
+    player_count = cursor.fetchone()[0]
+    
+    if player_count == 0:
+        conn.close()
         raise HTTPException(status_code=400, detail="Need at least one player to start")
     
-    quiz["started"] = True
+    # Start the quiz
+    cursor.execute("UPDATE quizzes SET started = 1 WHERE id = ?", (quiz_id,))
+    conn.commit()
+    conn.close()
+    
     return {"message": "Quiz started!", "started": True}
 
 @app.put("/api/player/{player_id}/score")
 def update_score(player_id: str, score: int):
     """Update player score"""
-    if player_id not in players:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id FROM players WHERE id = ?", (player_id,))
+    if not cursor.fetchone():
+        conn.close()
         raise HTTPException(status_code=404, detail="Player not found")
     
-    players[player_id]["score"] = score
-    
-    # Update in quiz as well
-    quiz_id = players[player_id]["quiz_id"]
-    for player in quizzes[quiz_id]["players"]:
-        if player["id"] == player_id:
-            player["score"] = score
-            break
+    cursor.execute("UPDATE players SET score = ? WHERE id = ?", (score, player_id))
+    conn.commit()
+    conn.close()
     
     return {"player_id": player_id, "score": score}
 
@@ -298,17 +435,11 @@ def submit_answer(day_number: int, submission: AnswerSubmission):
     """, (submission.player_id, submission.quiz_id))
     
     total_score = cursor.fetchone()[0] or 0
-    conn.close()
     
-    # Update in-memory player score
-    if submission.player_id in players:
-        players[submission.player_id]["score"] = total_score
-        quiz_id = players[submission.player_id]["quiz_id"]
-        if quiz_id in quizzes:
-            for player in quizzes[quiz_id]["players"]:
-                if player["id"] == submission.player_id:
-                    player["score"] = total_score
-                    break
+    # Update player's score in database
+    cursor.execute("UPDATE players SET score = ? WHERE id = ?", (total_score, submission.player_id))
+    conn.commit()
+    conn.close()
     
     return {
         "is_correct": is_correct,
