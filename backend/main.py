@@ -395,6 +395,20 @@ def submit_answer(day_number: int, submission: AnswerSubmission):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    # Check if player must complete previous day first (sequential access)
+    if day_number > 1:
+        cursor.execute("""
+            SELECT id FROM player_answers 
+            WHERE player_id = ? AND quiz_id = ? AND day_number = ?
+        """, (submission.player_id, submission.quiz_id, day_number - 1))
+        
+        if not cursor.fetchone():
+            conn.close()
+            raise HTTPException(
+                status_code=403, 
+                detail=f"Must complete day {day_number - 1} before accessing day {day_number}"
+            )
+    
     # Get the correct answer
     cursor.execute("SELECT correct_answer FROM questions WHERE day_number = ?", (day_number,))
     row = cursor.fetchone()
@@ -466,3 +480,28 @@ def get_answered_questions(player_id: str, quiz_id: str):
     answered = [{"day": row[0], "correct": bool(row[1]), "points": row[2]} for row in rows]
     
     return {"answered_questions": answered}
+
+@app.get("/api/player/{player_id}/quiz/{quiz_id}/can-access/{day_number}")
+def can_access_day(player_id: str, quiz_id: str, day_number: int):
+    """Check if a player can access a specific day (must complete previous days in order)"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Day 1 is always accessible
+    if day_number == 1:
+        conn.close()
+        return {"can_access": True, "reason": "First day is always accessible"}
+    
+    # Check if previous day was completed
+    cursor.execute("""
+        SELECT id FROM player_answers 
+        WHERE player_id = ? AND quiz_id = ? AND day_number = ?
+    """, (player_id, quiz_id, day_number - 1))
+    
+    if cursor.fetchone():
+        conn.close()
+        return {"can_access": True, "reason": f"Day {day_number - 1} completed"}
+    else:
+        conn.close()
+        return {"can_access": False, "reason": f"Must complete day {day_number - 1} first"}
+

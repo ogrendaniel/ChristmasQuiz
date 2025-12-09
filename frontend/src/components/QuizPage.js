@@ -67,11 +67,24 @@ function QuizPage({ quizData, playerData, isHost }) {
     }
   };
 
-  const handleDayClick = (day) => {
-    // If player and question already answered, don't allow click
-    if (!isHost && answeredQuestions.includes(day)) {
+  const handleDayClick = async (day) => {
+    // Hosts can access any day
+    if (isHost) {
+      setSelectedDay(day);
       return;
     }
+    
+    // If player and question already answered, don't allow click
+    if (answeredQuestions.includes(day)) {
+      return;
+    }
+    
+    // Check if player can access this day (must complete previous days)
+    if (day > 1 && !answeredQuestions.includes(day - 1)) {
+      alert(`You must complete day ${day - 1} before accessing day ${day}!`);
+      return;
+    }
+    
     setSelectedDay(day);
   };
 
@@ -87,6 +100,17 @@ function QuizPage({ quizData, playerData, isHost }) {
 
   const isDayAnswered = (day) => {
     return !isHost && answeredQuestions.includes(day);
+  };
+
+  const isDayLocked = (day) => {
+    // Hosts can access all days
+    if (isHost) return false;
+    
+    // Day 1 is always unlocked
+    if (day === 1) return false;
+    
+    // Check if previous day is completed
+    return !answeredQuestions.includes(day - 1);
   };
 
   if (selectedDay) {
@@ -136,26 +160,31 @@ function QuizPage({ quizData, playerData, isHost }) {
           </div>
         )}
 
-        <div className="advent-grid">{shuffledDays.map((day) => (
-            <div 
-              key={day} 
-              className={`advent-door ${isDayAnswered(day) ? 'answered' : ''}`}
-              onClick={() => handleDayClick(day)}
-            >
-              <div className="door-content">
-                <div className="door-number">{day}</div>
-                <div className="door-decoration">
-                  {isDayAnswered(day) ? '✓' : '❄️'}
+        <div className="advent-grid">{shuffledDays.map((day) => {
+            const isAnswered = isDayAnswered(day);
+            const isLocked = isDayLocked(day);
+            
+            return (
+              <div 
+                key={day} 
+                className={`advent-door ${isAnswered ? 'answered' : ''} ${isLocked ? 'locked' : ''}`}
+                onClick={() => handleDayClick(day)}
+              >
+                <div className="door-content">
+                  <div className="door-number">{day}</div>
+                  <div className="door-decoration">
+                    {isAnswered ? '✓' : '❄️'}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
       <div className="calendar-footer">
-        <p>Select any day to start that question!</p>
-        <p className="instruction">All 24 doors are available • Complete them all to finish the quiz</p>
+        <p>{isHost ? 'Select any day to view that question!' : 'Complete days in order from 1 to 24!'}</p>
+        <p className="instruction">{isHost ? 'All 24 doors are available' : 'Unlock doors by completing the previous day'}</p>
       </div>
     </div>
   );

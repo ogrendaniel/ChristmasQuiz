@@ -290,6 +290,19 @@
   opacity: 1;
 }
 
+/* Locked door styling (for players who haven't completed previous day) */
+.advent-door.locked {
+  cursor: not-allowed;
+}
+
+.advent-door.locked:hover {
+  transform: none;
+}
+
+.advent-door.locked::after {
+  display: none;
+}
+
 .door-content {
   height: 100%;
   display: flex;
