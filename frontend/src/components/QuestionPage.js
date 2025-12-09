@@ -168,9 +168,21 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
                 disabled={submitting}
                 autoFocus
               />
-              <button type="submit" disabled={submitting || !answer.trim()}>
-                {submitting ? 'Submitting...' : 'Submit Answer'}
+              <button type="submit" disabled={submitting || !answer.trim()} className={submitting ? 'checking' : ''}>
+                {submitting ? (
+                  <>
+                    <span className="spinner"></span>
+                    Checking answer with AI...
+                  </>
+                ) : (
+                  'Submit Answer'
+                )}
               </button>
+              {submitting && (
+                <p className="ai-checking-message">
+                  🤖 AI is analyzing your answer...
+                </p>
+              )}
             </form>
           )}
         </div>
