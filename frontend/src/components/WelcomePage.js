@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './WelcomePage.css';
+import { API_URL, fetchAPI } from '../config';
 
 function WelcomePage({ onCreateQuiz }) {
   const [loading, setLoading] = useState(false);
@@ -7,7 +8,7 @@ function WelcomePage({ onCreateQuiz }) {
   const handleCreateQuiz = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/quiz/create', {
+      const response = await fetchAPI(`${API_URL}/api/quiz/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

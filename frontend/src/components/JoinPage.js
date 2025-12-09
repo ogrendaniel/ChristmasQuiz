@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './JoinPage.css';
+import { API_URL, fetchAPI } from '../config';
 
 function JoinPage({ quizId, onJoinSuccess }) {
   const [username, setUsername] = useState('');
@@ -10,7 +11,7 @@ function JoinPage({ quizId, onJoinSuccess }) {
     // Verify quiz exists
     const checkQuiz = async () => {
       try {
-        const response = await fetch(`http://localhost:8000/api/quiz/${quizId}`);
+        const response = await fetchAPI(`${API_URL}/api/quiz/${quizId}`);
         if (response.ok) {
           const data = await response.json();
           if (data.started) {
@@ -41,8 +42,8 @@ function JoinPage({ quizId, onJoinSuccess }) {
 
     setLoading(true);
     try {
-      const response = await fetch(
-        `http://localhost:8000/api/quiz/${quizId}/join`,
+      const response = await fetchAPI(
+        `${API_URL}/api/quiz/${quizId}/join`,
         {
           method: 'POST',
           headers: {

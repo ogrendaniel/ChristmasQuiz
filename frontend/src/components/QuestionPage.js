@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './QuestionPage.css';
+import { API_URL, fetchAPI } from '../config';
 
 function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
   const [question, setQuestion] = useState(null);
@@ -12,7 +13,7 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
   useEffect(() => {
     const fetchQuestion = async () => {
       try {
-        const response = await fetch(`http://localhost:8000/api/questions/${dayNumber}`);
+        const response = await fetchAPI(`${API_URL}/api/questions/${dayNumber}`);
         if (!response.ok) {
           throw new Error('Question not found');
         }
@@ -39,8 +40,8 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
 
     setSubmitting(true);
     try {
-      const response = await fetch(
-        `http://localhost:8000/api/questions/${dayNumber}/answer`,
+      const response = await fetchAPI(
+        `${API_URL}/api/questions/${dayNumber}/answer`,
         {
           method: 'POST',
           headers: {

@@ -4,6 +4,7 @@ import WelcomePage from './components/WelcomePage';
 import WaitingRoom from './components/WaitingRoom';
 import JoinPage from './components/JoinPage';
 import QuizPage from './components/QuizPage';
+import { API_URL, fetchAPI } from './config';
 
 function App() {
   const [page, setPage] = useState('welcome'); // welcome, waiting, join, quiz
@@ -87,8 +88,8 @@ function PlayerWaitingRoom({ playerData, onQuizStart }) {
     // Poll to check if quiz has started
     const interval = setInterval(async () => {
       try {
-        const response = await fetch(
-          `http://localhost:8000/api/quiz/${playerData.quiz_id}`
+        const response = await fetchAPI(
+          `${API_URL}/api/quiz/${playerData.quiz_id}`
         );
         const data = await response.json();
         if (data.started && !quizStarted) {

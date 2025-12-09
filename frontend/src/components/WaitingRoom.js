@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './WaitingRoom.css';
+import { API_URL, fetchAPI } from '../config';
 
 function WaitingRoom({ quizData, onStartQuiz }) {
   const [players, setPlayers] = useState([]);
@@ -9,8 +10,8 @@ function WaitingRoom({ quizData, onStartQuiz }) {
   useEffect(() => {
     const fetchPlayers = async () => {
       try {
-        const response = await fetch(
-          `http://localhost:8000/api/quiz/${quizData.quiz_id}/players`
+        const response = await fetchAPI(
+          `${API_URL}/api/quiz/${quizData.quiz_id}/players`
         );
         const data = await response.json();
         setPlayers(data.players);
@@ -40,8 +41,8 @@ function WaitingRoom({ quizData, onStartQuiz }) {
 
     setLoading(true);
     try {
-      const response = await fetch(
-        `http://localhost:8000/api/quiz/${quizData.quiz_id}/start?host_id=${quizData.host_id}`,
+      const response = await fetchAPI(
+        `${API_URL}/api/quiz/${quizData.quiz_id}/start?host_id=${quizData.host_id}`,
         {
           method: 'POST',
           headers: {

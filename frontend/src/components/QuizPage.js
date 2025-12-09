@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import './QuizPage.css';
 import QuestionPage from './QuestionPage';
+import { API_URL, fetchAPI } from '../config';
 
 function QuizPage({ quizData, playerData, isHost }) {
   const [selectedDay, setSelectedDay] = useState(null);
@@ -24,8 +25,8 @@ function QuizPage({ quizData, playerData, isHost }) {
       const playerId = playerData.player_id || playerData.id;
       const quizId = quizData.quiz_id || playerData.quiz_id;
       
-      const response = await fetch(
-        `http://localhost:8000/api/player/${playerId}/quiz/${quizId}/answered`
+      const response = await fetchAPI(
+        `${API_URL}/api/player/${playerId}/quiz/${quizId}/answered`
       );
       
       if (response.ok) {

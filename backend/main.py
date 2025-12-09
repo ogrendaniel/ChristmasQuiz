@@ -6,13 +6,25 @@ import uuid
 from datetime import datetime
 import sqlite3
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = FastAPI()
+
+# Frontend URL configuration - can be set via environment variable
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 # Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://*.ngrok-free.app",  # Allow all ngrok URLs
+        "https://*.ngrok.io",
+        "*"  # Or add your specific ngrok URL here
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -110,7 +122,7 @@ def create_quiz():
     return {
         "quiz_id": quiz_id,
         "host_id": quizzes[quiz_id]["host_id"],
-        "join_link": f"http://localhost:3000/join/{quiz_id}"
+        "join_link": f"{FRONTEND_URL}/join/{quiz_id}"
     }
 
 @app.get("/api/quiz/{quiz_id}")
