@@ -1,34 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
-import WelcomePage from './components/WelcomePage';
+import LoginPage from './components/LoginPage';
+import RegisterPage from './components/RegisterPage';
+import DashboardPage from './components/DashboardPage';
+import QuestionManager from './components/QuestionManager';
+import QuizHistory from './components/QuizHistory';
 import WaitingRoom from './components/WaitingRoom';
 import JoinPage from './components/JoinPage';
 import QuizPage from './components/QuizPage';
-import { API_URL, fetchAPI } from './config';
+import { API_URL, fetchAPI, fetchAuthAPI } from './config';
 
 function App() {
-  const [page, setPage] = useState('welcome'); // welcome, waiting, join, quiz
+  const [page, setPage] = useState('loading'); // loading, login, register, dashboard, questions, history, waiting, join, quiz
+  const [userData, setUserData] = useState(null);
   const [quizData, setQuizData] = useState(null);
   const [playerData, setPlayerData] = useState(null);
   const [isHost, setIsHost] = useState(false);
 
   useEffect(() => {
-    // Try to restore session from localStorage
-    const savedPlayerData = localStorage.getItem('quizPlayerData');
-    const savedQuizData = localStorage.getItem('quizData');
-    const savedIsHost = localStorage.getItem('isHost');
+    checkAuthentication();
+  }, []);
+
+  const checkAuthentication = async () => {
+    const token = localStorage.getItem('authToken');
+    const savedUserData = localStorage.getItem('userData');
     
-    console.log('Restoring session:', { savedPlayerData, savedQuizData, savedIsHost });
-    
-    // Check if this is a join link
+    // Check if this is a join link (unauthenticated access allowed)
     const path = window.location.pathname;
     const joinMatch = path.match(/^\/join\/([a-zA-Z0-9]+)$/);
-    const hostMatch = path.match(/^\/host\/([a-zA-Z0-9]+)$/);
     
     if (joinMatch) {
       const quizId = joinMatch[1];
       
-      // Check if we have saved data for this quiz
+      // Check if we have saved player data for this quiz
+      const savedPlayerData = localStorage.getItem('quizPlayerData');
       if (savedPlayerData) {
         const playerInfo = JSON.parse(savedPlayerData);
         if (playerInfo.quiz_id === quizId) {
@@ -44,35 +49,68 @@ function App() {
       // New join
       setPage('join');
       setQuizData({ quiz_id: quizId });
-    } else if (hostMatch) {
-      const quizId = hostMatch[1];
-      
-      // Check if we have saved host data for this quiz
-      if (savedQuizData && savedIsHost === 'true') {
-        const quizInfo = JSON.parse(savedQuizData);
-        if (quizInfo.quiz_id === quizId) {
-          // Restore host session
-          setQuizData(quizInfo);
-          setIsHost(true);
-          setPage('quiz');
-          return;
-        }
-      }
-      
-      // If we have host data but different quiz ID, redirect to the saved quiz
-      if (savedIsHost === 'true' && savedQuizData) {
-        const quizInfo = JSON.parse(savedQuizData);
-        setQuizData(quizInfo);
-        setIsHost(true);
-        window.history.pushState({}, '', `/host/${quizInfo.quiz_id}`);
-        setPage('quiz');
-        return;
-      }
+      return;
     }
     
-    // Root URL or any other URL - show welcome page
-    // Don't auto-restore session, let user choose
-  }, []);
+    // Check for authenticated user
+    if (!token || !savedUserData) {
+      setPage('login');
+      return;
+    }
+
+    try {
+      // Verify token is still valid
+      const response = await fetchAuthAPI(`${API_URL}/api/auth/me`);
+      if (response.ok) {
+        const data = await response.json();
+        setUserData(data);
+        
+        // Check if returning to a hosted quiz
+        const savedQuizData = localStorage.getItem('quizData');
+        const savedIsHost = localStorage.getItem('isHost');
+        
+        if (savedIsHost === 'true' && savedQuizData) {
+          const quizInfo = JSON.parse(savedQuizData);
+          setQuizData(quizInfo);
+          setIsHost(true);
+          window.history.pushState({}, '', `/host/${quizInfo.quiz_id}`);
+          setPage('quiz');
+        } else {
+          setPage('dashboard');
+        }
+      } else {
+        // Token invalid, clear and show login
+        handleLogout();
+      }
+    } catch (err) {
+      console.error('Auth check failed:', err);
+      handleLogout();
+    }
+  };
+
+  const handleLogin = (data) => {
+    setUserData(data);
+    setPage('dashboard');
+    window.history.pushState({}, '', '/');
+  };
+
+  const handleRegister = (data) => {
+    setUserData(data);
+    setPage('dashboard');
+    window.history.pushState({}, '', '/');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('userData');
+    localStorage.removeItem('quizData');
+    localStorage.removeItem('isHost');
+    setUserData(null);
+    setQuizData(null);
+    setIsHost(false);
+    setPage('login');
+    window.history.pushState({}, '', '/');
+  };
 
   const handleCreateQuiz = (data) => {
     setQuizData(data);
@@ -104,10 +142,57 @@ function App() {
     setPage('quiz');
   };
 
+  const handleBackToDashboard = () => {
+    setPage('dashboard');
+    window.history.pushState({}, '', '/');
+  };
+
+  if (page === 'loading') {
+    return (
+      <div className="App" style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #c92a2a 0%, #8b1a1a 100%)'
+      }}>
+        <div style={{ color: 'white', fontSize: '1.5em' }}>Loading...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="App">
-      {page === 'welcome' && (
-        <WelcomePage onCreateQuiz={handleCreateQuiz} />
+      {page === 'login' && (
+        <LoginPage 
+          onLogin={handleLogin}
+          onSwitchToRegister={() => setPage('register')}
+        />
+      )}
+      
+      {page === 'register' && (
+        <RegisterPage 
+          onRegister={handleRegister}
+          onSwitchToLogin={() => setPage('login')}
+        />
+      )}
+      
+      {page === 'dashboard' && userData && (
+        <DashboardPage 
+          userData={userData}
+          onCreateQuiz={handleCreateQuiz}
+          onNavigateToQuestions={() => setPage('questions')}
+          onNavigateToHistory={() => setPage('history')}
+          onLogout={handleLogout}
+        />
+      )}
+      
+      {page === 'questions' && userData && (
+        <QuestionManager onBack={handleBackToDashboard} />
+      )}
+      
+      {page === 'history' && userData && (
+        <QuizHistory onBack={handleBackToDashboard} />
       )}
       
       {page === 'waiting' && quizData && (

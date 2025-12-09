@@ -12,3 +12,16 @@ export const fetchAPI = (url, options = {}) => {
     }
   });
 };
+
+// Helper function for authenticated API calls
+export const fetchAuthAPI = (url, options = {}) => {
+  const token = localStorage.getItem('authToken');
+  return fetchAPI(url, {
+    ...options,
+    headers: {
+      'Authorization': token ? `Bearer ${token}` : '',
+      'Content-Type': 'application/json',
+      ...options.headers
+    }
+  });
+};

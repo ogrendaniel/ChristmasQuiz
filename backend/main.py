@@ -857,6 +857,158 @@ def get_quiz_results(quiz_id: str, user_data: dict = Depends(verify_token)):
     
     return {"players": players}
 
+@app.get("/api/quiz/{quiz_id}/player/{player_id}/answers")
+def get_player_answers(quiz_id: str, player_id: str, user_data: dict = Depends(verify_token)):
+    """Get all answers for a specific player in a quiz"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Verify the quiz belongs to the user
+    cursor.execute("""
+        SELECT id, question_set_id FROM quizzes WHERE id = ? AND user_id = ?
+    """, (quiz_id, user_data["user_id"]))
+    
+    quiz_row = cursor.fetchone()
+    if not quiz_row:
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Quiz not found"
+        )
+    
+    question_set_id = quiz_row[1]
+    
+    # Get player answers with question details
+    cursor.execute("""
+        SELECT pa.day_number, pa.answer, pa.is_correct, pa.points_earned, pa.answered_at,
+               COALESCE(cq.question_text, q.question_text) as question_text,
+               COALESCE(cq.correct_answer, q.correct_answer) as correct_answer
+        FROM player_answers pa
+        LEFT JOIN custom_questions cq ON pa.day_number = cq.day_number AND cq.question_set_id = ?
+        LEFT JOIN questions q ON pa.day_number = q.day_number
+        WHERE pa.player_id = ? AND pa.quiz_id = ?
+        ORDER BY pa.day_number
+    """, (question_set_id, player_id, quiz_id))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    answers = [
+        {
+            "day_number": row[0],
+            "player_answer": row[1],
+            "is_correct": bool(row[2]),
+            "points_earned": row[3],
+            "answered_at": row[4],
+            "question_text": row[5],
+            "correct_answer": row[6]
+        }
+        for row in rows
+    ]
+    
+    return {"answers": answers}
+
+class ScoreUpdate(BaseModel):
+    score: int
+
+@app.put("/api/quiz/{quiz_id}/player/{player_id}/score")
+def update_player_score(quiz_id: str, player_id: str, score_update: ScoreUpdate, user_data: dict = Depends(verify_token)):
+    """Update a player's total score"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Verify the quiz belongs to the user
+    cursor.execute("""
+        SELECT id FROM quizzes WHERE id = ? AND user_id = ?
+    """, (quiz_id, user_data["user_id"]))
+    
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Quiz not found"
+        )
+    
+    # Update player score
+    cursor.execute("""
+        UPDATE players SET score = ? WHERE id = ? AND quiz_id = ?
+    """, (score_update.score, player_id, quiz_id))
+    
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+    
+    conn.commit()
+    conn.close()
+    
+    return {"message": "Score updated successfully", "new_score": score_update.score}
+
+class AnswerUpdate(BaseModel):
+    is_correct: bool
+    points_earned: int
+
+@app.put("/api/quiz/{quiz_id}/player/{player_id}/answer/{day_number}")
+def update_player_answer(quiz_id: str, player_id: str, day_number: int, answer_update: AnswerUpdate, user_data: dict = Depends(verify_token)):
+    """Update a player's answer (toggle correctness and points)"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Verify the quiz belongs to the user
+    cursor.execute("""
+        SELECT id FROM quizzes WHERE id = ? AND user_id = ?
+    """, (quiz_id, user_data["user_id"]))
+    
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Quiz not found"
+        )
+    
+    # Get old points to calculate score difference
+    cursor.execute("""
+        SELECT points_earned FROM player_answers 
+        WHERE player_id = ? AND quiz_id = ? AND day_number = ?
+    """, (player_id, quiz_id, day_number))
+    
+    old_row = cursor.fetchone()
+    if not old_row:
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Answer not found"
+        )
+    
+    old_points = old_row[0]
+    points_difference = answer_update.points_earned - old_points
+    
+    # Update the answer
+    cursor.execute("""
+        UPDATE player_answers 
+        SET is_correct = ?, points_earned = ?
+        WHERE player_id = ? AND quiz_id = ? AND day_number = ?
+    """, (answer_update.is_correct, answer_update.points_earned, player_id, quiz_id, day_number))
+    
+    # Update player's total score
+    cursor.execute("""
+        UPDATE players 
+        SET score = score + ?
+        WHERE id = ? AND quiz_id = ?
+    """, (points_difference, player_id, quiz_id))
+    
+    conn.commit()
+    conn.close()
+    
+    return {
+        "message": "Answer updated successfully",
+        "is_correct": answer_update.is_correct,
+        "points_earned": answer_update.points_earned,
+        "points_difference": points_difference
+    }
+
 # Question endpoints
 @app.post("/api/questions")
 def create_question(question: Question):
