@@ -662,6 +662,22 @@
   color: white;
 }
 
+.ai-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.85em;
+  font-weight: bold;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  cursor: help;
+  transition: transform 0.2s;
+}
+
+.ai-badge:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+}
+
 .col-points {
   display: flex;
   align-items: center;

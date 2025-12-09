@@ -407,6 +407,14 @@ function QuizHistory({ onBack }) {
                                       <span className={`status-badge ${answer.is_correct ? 'correct-badge' : 'incorrect-badge'}`}>
                                         {answer.is_correct ? '✓ Correct' : '✗ Incorrect'}
                                       </span>
+                                      {answer.ai_verified && (
+                                        <span 
+                                          className="ai-badge" 
+                                          title={`AI Verified (${answer.ai_confidence}% confidence)\n${answer.ai_reasoning}`}
+                                        >
+                                          🤖 AI {answer.ai_confidence}%
+                                        </span>
+                                      )}
                                     </div>
 
                                     {/* Content */}

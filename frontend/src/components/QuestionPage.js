@@ -13,7 +13,8 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
   useEffect(() => {
     const fetchQuestion = async () => {
       try {
-        const response = await fetchAPI(`${API_URL}/api/questions/${dayNumber}`);
+        const quizId = quizData.quiz_id || playerData.quiz_id;
+        const response = await fetchAPI(`${API_URL}/api/questions/${dayNumber}?quiz_id=${quizId}`);
         if (!response.ok) {
           throw new Error('Question not found');
         }

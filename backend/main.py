@@ -10,6 +10,8 @@ import os
 from dotenv import load_dotenv
 import bcrypt
 import jwt
+import ollama
+import re
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,6 +20,11 @@ load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24 * 30  # 30 days
+
+# Ollama Configuration
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")  # Can be changed to mistral, llama3, etc.
+USE_OLLAMA = os.getenv("USE_OLLAMA", "true").lower() == "true"
+OLLAMA_CONFIDENCE_THRESHOLD = int(os.getenv("OLLAMA_CONFIDENCE_THRESHOLD", "80"))  # 80% minimum confidence
 
 security = HTTPBearer()
 
@@ -145,6 +152,9 @@ def init_db():
             is_correct BOOLEAN NOT NULL,
             points_earned INTEGER NOT NULL,
             answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ai_verified BOOLEAN DEFAULT 0,
+            ai_confidence INTEGER,
+            ai_reasoning TEXT,
             FOREIGN KEY (player_id) REFERENCES players(id),
             UNIQUE(player_id, quiz_id, day_number)
         )
@@ -236,6 +246,98 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token"
         )
+
+def check_answer_with_ai(player_answer: str, correct_answer: str) -> dict:
+    """
+    Use Ollama to check if player's answer matches the correct answer.
+    Returns dict with: is_match (bool), confidence (int 0-100), reasoning (str), method (str)
+    """
+    print(f"AI CHECK - Player: '{player_answer}' | Correct: '{correct_answer}' | USE_OLLAMA: {USE_OLLAMA}")
+    
+    if not USE_OLLAMA:
+        # Fallback to exact match if Ollama is disabled
+        is_exact = player_answer.strip().lower() == correct_answer.strip().lower()
+        return {
+            "is_match": is_exact,
+            "confidence": 100 if is_exact else 0,
+            "reasoning": "Exact match" if is_exact else "No exact match",
+            "method": "exact"
+        }
+    
+    try:
+        prompt = f"""Compare these two answers and determine if they match, considering:
+- Minor spelling mistakes (e.g., "Cristmas" vs "Christmas", "tvspel" vs "tv-spel")
+- Different wordings that mean the same thing (e.g., "Santa Claus" vs "Father Christmas")
+- Partial answers that capture the essential meaning
+- Capitalization and punctuation differences
+- For lists: items can be in any order, separators can vary (commas, "och"/"and", etc.)
+- For lists: matching items even with spelling variations counts as correct
+
+Player's answer: "{player_answer}"
+Correct answer: "{correct_answer}"
+
+If these are lists, check if they contain the same items (order doesn't matter).
+Spelling variations and different separators (comma, "och", "and") should be accepted.
+
+Respond ONLY in this exact format:
+MATCH: YES or NO
+CONFIDENCE: [0-100]
+REASONING: [brief explanation]
+
+Example response:
+MATCH: YES
+CONFIDENCE: 95
+REASONING: Same list items in different order with minor spelling variations"""
+
+        response = ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[{
+                'role': 'user',
+                'content': prompt
+            }],
+            options={
+                'temperature': 0.1,  # Low temperature for more consistent results
+                'num_predict': 100   # Limit response length
+            }
+        )
+        
+        response_text = response['message']['content'].strip()
+        print(f"AI RESPONSE: {response_text}")
+        
+        # Parse the response
+        match_line = re.search(r'MATCH:\s*(YES|NO)', response_text, re.IGNORECASE)
+        confidence_line = re.search(r'CONFIDENCE:\s*(\d+)', response_text)
+        reasoning_line = re.search(r'REASONING:\s*(.+)', response_text, re.IGNORECASE)
+        
+        if not match_line or not confidence_line:
+            raise ValueError("Invalid AI response format")
+        
+        is_match = match_line.group(1).upper() == "YES"
+        confidence = int(confidence_line.group(1))
+        reasoning = reasoning_line.group(1).strip() if reasoning_line else "AI evaluation"
+        
+        # Only accept if confidence meets threshold
+        if is_match and confidence < OLLAMA_CONFIDENCE_THRESHOLD:
+            is_match = False
+            reasoning = f"Confidence {confidence}% below threshold {OLLAMA_CONFIDENCE_THRESHOLD}%"
+        
+        return {
+            "is_match": is_match,
+            "confidence": confidence,
+            "reasoning": reasoning,
+            "method": "ai"
+        }
+        
+    except Exception as e:
+        print(f"Ollama error: {e}. Falling back to exact match.")
+        # Fallback to exact match on error
+        is_exact = player_answer.strip().lower() == correct_answer.strip().lower()
+        return {
+            "is_match": is_exact,
+            "confidence": 100 if is_exact else 0,
+            "reasoning": f"AI unavailable, used exact match. Error: {str(e)}",
+            "method": "exact_fallback"
+        }
 
 @app.get("/")
 def root():
@@ -932,7 +1034,8 @@ def get_player_answers(quiz_id: str, player_id: str, user_data: dict = Depends(v
     cursor.execute("""
         SELECT pa.day_number, pa.answer, pa.is_correct, pa.points_earned, pa.answered_at,
                COALESCE(cq.question_text, q.question_text) as question_text,
-               COALESCE(cq.correct_answer, q.correct_answer) as correct_answer
+               COALESCE(cq.correct_answer, q.correct_answer) as correct_answer,
+               pa.ai_verified, pa.ai_confidence, pa.ai_reasoning
         FROM player_answers pa
         LEFT JOIN custom_questions cq ON pa.day_number = cq.day_number AND cq.question_set_id = ?
         LEFT JOIN questions q ON pa.day_number = q.day_number
@@ -951,7 +1054,10 @@ def get_player_answers(quiz_id: str, player_id: str, user_data: dict = Depends(v
             "points_earned": row[3],
             "answered_at": row[4],
             "question_text": row[5],
-            "correct_answer": row[6]
+            "correct_answer": row[6],
+            "ai_verified": bool(row[7]) if row[7] is not None else False,
+            "ai_confidence": row[8],
+            "ai_reasoning": row[9]
         }
         for row in rows
     ]
@@ -1173,10 +1279,18 @@ def submit_answer(day_number: int, submission: AnswerSubmission):
         conn.close()
         raise HTTPException(status_code=404, detail="Question not found")
     
-    correct_answer = row[0].strip().lower()
-    user_answer = submission.answer.strip().lower()
-    is_correct = correct_answer == user_answer
+    correct_answer = row[0]
+    user_answer = submission.answer
+    
+    # Use AI-powered answer checking
+    check_result = check_answer_with_ai(user_answer, correct_answer)
+    is_correct = check_result["is_match"]
     points_earned = 10 if is_correct else 0
+    
+    # Extract AI metadata
+    ai_verified = check_result["method"] == "ai"
+    ai_confidence = check_result["confidence"] if ai_verified else None
+    ai_reasoning = check_result["reasoning"] if ai_verified else None
     
     # Check if player already answered this question
     cursor.execute("""
@@ -1192,9 +1306,9 @@ def submit_answer(day_number: int, submission: AnswerSubmission):
     
     # Record the answer
     cursor.execute("""
-        INSERT INTO player_answers (player_id, quiz_id, day_number, answer, is_correct, points_earned)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (submission.player_id, submission.quiz_id, day_number, submission.answer, is_correct, points_earned))
+        INSERT INTO player_answers (player_id, quiz_id, day_number, answer, is_correct, points_earned, ai_verified, ai_confidence, ai_reasoning)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (submission.player_id, submission.quiz_id, day_number, submission.answer, is_correct, points_earned, ai_verified, ai_confidence, ai_reasoning))
     
     conn.commit()
     
