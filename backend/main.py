@@ -177,7 +177,7 @@ def get_quiz(quiz_id: str):
 
 @app.post("/api/quiz/{quiz_id}/join")
 def join_quiz(quiz_id: str, player: Player):
-    """Add a player to the quiz"""
+    """Add a player to the quiz or rejoin with existing username"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
@@ -189,18 +189,28 @@ def join_quiz(quiz_id: str, player: Player):
         conn.close()
         raise HTTPException(status_code=404, detail="Quiz not found")
     
-    if quiz_row[0]:  # started is True
-        conn.close()
-        raise HTTPException(status_code=400, detail="Quiz already started")
-    
     # Check if username already exists in this quiz
     cursor.execute("""
-        SELECT id FROM players WHERE quiz_id = ? AND username = ?
+        SELECT id, score FROM players WHERE quiz_id = ? AND username = ?
     """, (quiz_id, player.username))
     
-    if cursor.fetchone():
+    existing_player = cursor.fetchone()
+    
+    if existing_player:
+        # Player is rejoining - return their existing data
         conn.close()
-        raise HTTPException(status_code=400, detail="Username already taken")
+        return {
+            "player_id": existing_player[0],
+            "username": player.username,
+            "quiz_id": quiz_id,
+            "score": existing_player[1],
+            "rejoined": True
+        }
+    
+    # New player joining
+    if quiz_row[0]:  # started is True
+        conn.close()
+        raise HTTPException(status_code=400, detail="Quiz already started, cannot join as a new player")
     
     player_id = str(uuid.uuid4())
     
@@ -215,7 +225,9 @@ def join_quiz(quiz_id: str, player: Player):
     return {
         "player_id": player_id,
         "username": player.username,
-        "quiz_id": quiz_id
+        "quiz_id": quiz_id,
+        "score": 0,
+        "rejoined": False
     }
 
 @app.get("/api/quiz/{quiz_id}/players")

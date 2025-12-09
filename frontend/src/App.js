@@ -13,21 +13,74 @@ function App() {
   const [isHost, setIsHost] = useState(false);
 
   useEffect(() => {
+    // Try to restore session from localStorage
+    const savedPlayerData = localStorage.getItem('quizPlayerData');
+    const savedQuizData = localStorage.getItem('quizData');
+    const savedIsHost = localStorage.getItem('isHost');
+    
+    console.log('Restoring session:', { savedPlayerData, savedQuizData, savedIsHost });
+    
     // Check if this is a join link
     const path = window.location.pathname;
     const joinMatch = path.match(/^\/join\/([a-zA-Z0-9]+)$/);
+    const hostMatch = path.match(/^\/host\/([a-zA-Z0-9]+)$/);
     
     if (joinMatch) {
       const quizId = joinMatch[1];
+      
+      // Check if we have saved data for this quiz
+      if (savedPlayerData) {
+        const playerInfo = JSON.parse(savedPlayerData);
+        if (playerInfo.quiz_id === quizId) {
+          // Restore player session
+          setPlayerData(playerInfo);
+          setQuizData({ quiz_id: quizId });
+          setIsHost(false);
+          setPage('quiz');
+          return;
+        }
+      }
+      
+      // New join
       setPage('join');
       setQuizData({ quiz_id: quizId });
+    } else if (hostMatch) {
+      const quizId = hostMatch[1];
+      
+      // Check if we have saved host data for this quiz
+      if (savedQuizData && savedIsHost === 'true') {
+        const quizInfo = JSON.parse(savedQuizData);
+        if (quizInfo.quiz_id === quizId) {
+          // Restore host session
+          setQuizData(quizInfo);
+          setIsHost(true);
+          setPage('quiz');
+          return;
+        }
+      }
+      
+      // If we have host data but different quiz ID, redirect to the saved quiz
+      if (savedIsHost === 'true' && savedQuizData) {
+        const quizInfo = JSON.parse(savedQuizData);
+        setQuizData(quizInfo);
+        setIsHost(true);
+        window.history.pushState({}, '', `/host/${quizInfo.quiz_id}`);
+        setPage('quiz');
+        return;
+      }
     }
+    
+    // Root URL or any other URL - show welcome page
+    // Don't auto-restore session, let user choose
   }, []);
 
   const handleCreateQuiz = (data) => {
     setQuizData(data);
     setIsHost(true);
     setPage('waiting');
+    // Save to localStorage
+    localStorage.setItem('quizData', JSON.stringify(data));
+    localStorage.setItem('isHost', 'true');
     // Update URL without reloading
     window.history.pushState({}, '', `/host/${data.quiz_id}`);
   };
@@ -35,7 +88,16 @@ function App() {
   const handleJoinSuccess = (data) => {
     setPlayerData(data);
     setIsHost(false);
-    setPage('player-waiting');
+    // Save to localStorage
+    localStorage.setItem('quizPlayerData', JSON.stringify(data));
+    localStorage.setItem('isHost', 'false');
+    
+    if (data.rejoined) {
+      // If rejoining, go straight to quiz
+      setPage('quiz');
+    } else {
+      setPage('player-waiting');
+    }
   };
 
   const handleStartQuiz = () => {

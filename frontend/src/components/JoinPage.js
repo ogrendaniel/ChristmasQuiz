@@ -14,12 +14,8 @@ function JoinPage({ quizId, onJoinSuccess }) {
         const response = await fetchAPI(`${API_URL}/api/quiz/${quizId}`);
         if (response.ok) {
           const data = await response.json();
-          if (data.started) {
-            alert('This quiz has already started!');
-            setQuizExists(false);
-          } else {
-            setQuizExists(true);
-          }
+          // Quiz exists - allow joining/rejoining regardless of started status
+          setQuizExists(true);
         } else {
           setQuizExists(false);
         }
@@ -59,6 +55,12 @@ function JoinPage({ quizId, onJoinSuccess }) {
       }
       
       const data = await response.json();
+      
+      // Show different message for rejoining vs new join
+      if (data.rejoined) {
+        alert(`Welcome back, ${data.username}! Your progress has been restored.`);
+      }
+      
       onJoinSuccess(data);
     } catch (error) {
       console.error('Error joining quiz:', error);
