@@ -1,6 +1,8 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 import uuid
@@ -12,6 +14,7 @@ import bcrypt
 import jwt
 import ollama
 import re
+from pathlib import Path
 
 # Load environment variables from .env file
 load_dotenv()
@@ -49,6 +52,30 @@ app.add_middleware(
 
 # Database setup
 DB_PATH = "quiz_database.db"
+
+# Create images directory if it doesn't exist
+IMAGES_DIR = Path("images")
+IMAGES_DIR.mkdir(exist_ok=True)
+
+# Mount static files for images AFTER CORS middleware
+app.mount("/images", StaticFiles(directory="images"), name="images")
+
+def get_full_image_url(image_path: str, request) -> str:
+    """Convert relative image paths to full URLs"""
+    if not image_path:
+        return None
+    
+    # If it's already a full URL (starts with http:// or https://), return as-is
+    if image_path.startswith('http://') or image_path.startswith('https://'):
+        return image_path
+    
+    # If it's a relative path starting with /images/, convert to API endpoint
+    if image_path.startswith('/images/'):
+        base_url = str(request.base_url).rstrip('/')
+        filename = image_path.replace('/images/', '')
+        return f"{base_url}/api/image/{filename}"
+    
+    return image_path
 
 def init_db():
     """Initialize the database with all required tables"""
@@ -715,6 +742,37 @@ def create_question_set(data: CustomQuestionSetCreate, user_data: dict = Depends
         "user_id": user_data["user_id"]
     }
 
+@app.get("/api/images")
+def list_available_images():
+    """Get list of available images in the images directory"""
+    images = []
+    for ext in ['*.jpg', '*.jpeg', '*.png', '*.gif', '*.webp']:
+        images.extend([f.name for f in IMAGES_DIR.glob(ext)])
+    
+    return {
+        "images": [
+            {
+                "name": img,
+                "url": f"/api/image/{img}"
+            }
+            for img in sorted(images)
+        ]
+    }
+
+@app.get("/api/image/{filename}")
+def get_image(filename: str):
+    """Serve an image file from the images directory"""
+    file_path = IMAGES_DIR / filename
+    
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    # Security check - make sure the file is actually in the images directory
+    if not str(file_path.resolve()).startswith(str(IMAGES_DIR.resolve())):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    return FileResponse(file_path)
+
 @app.get("/api/question-sets")
 def get_user_question_sets(user_data: dict = Depends(verify_token)):
     """Get all question sets for the current user"""
@@ -798,7 +856,7 @@ def create_custom_question(set_id: str, question: Question, user_data: dict = De
         )
 
 @app.get("/api/question-sets/{set_id}/questions")
-def get_custom_questions(set_id: str, user_data: dict = Depends(verify_token)):
+def get_custom_questions(set_id: str, request: Request, user_data: dict = Depends(verify_token)):
     """Get all questions in a custom question set"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -831,12 +889,71 @@ def get_custom_questions(set_id: str, user_data: dict = Depends(verify_token)):
             "day_number": row[1],
             "question_text": row[2],
             "correct_answer": row[3],
-            "images": [img for img in [row[4], row[5], row[6], row[7], row[8]] if img]
+            "image_1": row[4],
+            "image_2": row[5],
+            "image_3": row[6],
+            "image_4": row[7],
+            "image_5": row[8],
+            "images": [get_full_image_url(img, request) for img in [row[4], row[5], row[6], row[7], row[8]] if img]
         }
         for row in rows
     ]
     
     return {"questions": questions}
+
+@app.put("/api/question-sets/{set_id}/questions/{day_number}")
+def update_custom_question(set_id: str, day_number: int, data: Question, user_data: dict = Depends(verify_token)):
+    """Update a specific question in a custom question set"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Verify the question set belongs to the user
+    cursor.execute("""
+        SELECT id FROM custom_question_sets WHERE id = ? AND user_id = ?
+    """, (set_id, user_data["user_id"]))
+    
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Question set not found"
+        )
+    
+    # Check if question exists
+    cursor.execute("""
+        SELECT id FROM custom_questions 
+        WHERE question_set_id = ? AND day_number = ?
+    """, (set_id, day_number))
+    
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Question for day {day_number} not found in this set"
+        )
+    
+    # Update the question
+    cursor.execute("""
+        UPDATE custom_questions 
+        SET question_text = ?, correct_answer = ?,
+            image_1 = ?, image_2 = ?, image_3 = ?, image_4 = ?, image_5 = ?
+        WHERE question_set_id = ? AND day_number = ?
+    """, (
+        data.question_text,
+        data.correct_answer,
+        data.image_1 or None,
+        data.image_2 or None,
+        data.image_3 or None,
+        data.image_4 or None,
+        data.image_5 or None,
+        set_id,
+        day_number
+    ))
+    
+    conn.commit()
+    conn.close()
+    
+    return {"message": "Question updated successfully"}
 
 @app.delete("/api/question-sets/{set_id}/questions/{day_number}")
 def delete_custom_question(set_id: str, day_number: int, user_data: dict = Depends(verify_token)):
@@ -1257,7 +1374,7 @@ def create_question(question: Question):
         raise HTTPException(status_code=400, detail="Question for this day already exists")
 
 @app.get("/api/questions/{day_number}")
-def get_question(day_number: int, quiz_id: Optional[str] = None):
+def get_question(day_number: int, request: Request, quiz_id: Optional[str] = None):
     """Get question for a specific day (from custom set if quiz uses one, otherwise standard)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -1296,8 +1413,9 @@ def get_question(day_number: int, quiz_id: Optional[str] = None):
     if not row:
         raise HTTPException(status_code=404, detail="Question not found")
     
-    # Collect images that are not null
-    images = [img for img in [row[2], row[3], row[4], row[5], row[6]] if img]
+    # Collect images that are not null and convert to full URLs
+    raw_images = [img for img in [row[2], row[3], row[4], row[5], row[6]] if img]
+    images = [get_full_image_url(img, request) for img in raw_images]
     
     return {
         "day_number": row[0],

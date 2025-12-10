@@ -9,6 +9,7 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
   const [submitting, setSubmitting] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [result, setResult] = useState(null);
+  const [imageUrls, setImageUrls] = useState([]);
 
   useEffect(() => {
     const fetchQuestion = async () => {
@@ -20,6 +21,23 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
         }
         const data = await response.json();
         setQuestion(data);
+        
+        // Fetch images as blobs to add ngrok header
+        if (data.images && data.images.length > 0) {
+          const imageBlobs = await Promise.all(
+            data.images.map(async (imageUrl) => {
+              try {
+                const response = await fetchAPI(imageUrl);
+                const blob = await response.blob();
+                return URL.createObjectURL(blob);
+              } catch (error) {
+                console.error('Failed to load image:', imageUrl, error);
+                return null;
+              }
+            })
+          );
+          setImageUrls(imageBlobs.filter(url => url !== null));
+        }
       } catch (error) {
         console.error('Error fetching question:', error);
         alert('Failed to load question. This question may not be set up yet.');
@@ -29,6 +47,13 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
     };
 
     fetchQuestion();
+    
+    // Cleanup blob URLs on unmount
+    return () => {
+      imageUrls.forEach(url => {
+        if (url) URL.revokeObjectURL(url);
+      });
+    };
   }, [dayNumber]);
 
   const handleSubmit = async (e) => {
@@ -97,10 +122,13 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
     );
   }
 
-  const imageCount = question.images.length;
+  const imageCount = imageUrls.length;
 
   return (
     <div className="question-page-container">
+      {/* Snowflakes overlay */}
+      <div className="snow-overlay"></div>
+      
       {showResult && (
         <div className="result-popup">
           <div className="result-content">
@@ -127,11 +155,6 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
         
         <div className="question-header">
           <h1>Day {dayNumber}</h1>
-          {isHost ? (
-            <p className="player-info host-badge">👑 HOST (View Only)</p>
-          ) : (
-            <p className="player-info">{playerData.username}</p>
-          )}
         </div>
 
         <div className="question-main">
@@ -139,9 +162,17 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
 
           {imageCount > 0 && (
             <div className={`image-grid grid-${imageCount}`}>
-              {question.images.map((image, index) => (
+              {imageUrls.map((imageUrl, index) => (
                 <div key={index} className="image-slot">
-                  <img src={image} alt={`Question visual ${index + 1}`} />
+                  <img 
+                    src={imageUrl} 
+                    alt={`Question visual ${index + 1}`}
+                    onError={(e) => {
+                      console.error(`Failed to load image at index ${index}`);
+                      e.target.style.display = 'none';
+                    }}
+                    onLoad={() => console.log(`Image ${index + 1} loaded successfully`)}
+                  />
                 </div>
               ))}
             </div>
@@ -158,7 +189,6 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="answer-form">
-              <label htmlFor="answer">Your Answer:</label>
               <input
                 type="text"
                 id="answer"

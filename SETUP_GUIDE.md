@@ -11,6 +11,9 @@
 
 ## 📋 Setup Instructions
 
+### Ngrok start
+C:\Users\danie\AppData\Local\Microsoft\WindowsApps\ngrok.exe start --all --config ngrok.yml
+
 ### Backend Setup
 
 1. **Install Python Dependencies**

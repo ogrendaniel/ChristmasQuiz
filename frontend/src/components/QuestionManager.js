@@ -12,6 +12,7 @@ function QuestionManager({ onBack }) {
   const [showQuestionForm, setShowQuestionForm] = useState(false);
   const [newSetName, setNewSetName] = useState('');
   const [editingQuestion, setEditingQuestion] = useState(null);
+  const [availableImages, setAvailableImages] = useState([]);
 
   // Form state for question
   const [questionForm, setQuestionForm] = useState({
@@ -25,8 +26,18 @@ function QuestionManager({ onBack }) {
     image_5: ''
   });
 
+  // Image source type (local or url) for each image slot
+  const [imageSourceType, setImageSourceType] = useState({
+    image_1: 'url',
+    image_2: 'url',
+    image_3: 'url',
+    image_4: 'url',
+    image_5: 'url'
+  });
+
   useEffect(() => {
     fetchQuestionSets();
+    fetchAvailableImages();
   }, []);
 
   useEffect(() => {
@@ -48,6 +59,18 @@ function QuestionManager({ onBack }) {
       setError('Failed to load question sets');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAvailableImages = async () => {
+    try {
+      const response = await fetchAuthAPI(`${API_URL}/api/images`);
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableImages(data.images || []);
+      }
+    } catch (err) {
+      console.error('Error fetching available images:', err);
     }
   };
 
@@ -135,6 +158,12 @@ function QuestionManager({ onBack }) {
 
   const handleSaveQuestion = async (e) => {
     e.preventDefault();
+    
+    // If editing, use update function instead
+    if (editingQuestion) {
+      return handleUpdateQuestion(e);
+    }
+    
     if (!selectedSet) return;
 
     try {
@@ -173,6 +202,66 @@ function QuestionManager({ onBack }) {
       image_5: ''
     });
     setEditingQuestion(null);
+    setImageSourceType({
+      image_1: 'url',
+      image_2: 'url',
+      image_3: 'url',
+      image_4: 'url',
+      image_5: 'url'
+    });
+  };
+
+  const handleEditQuestion = (question) => {
+    setQuestionForm({
+      day_number: question.day_number,
+      question_text: question.question_text,
+      correct_answer: question.correct_answer,
+      image_1: question.image_1 || '',
+      image_2: question.image_2 || '',
+      image_3: question.image_3 || '',
+      image_4: question.image_4 || '',
+      image_5: question.image_5 || ''
+    });
+    
+    // Detect if images are local or external URLs
+    const newImageSourceType = {};
+    for (let i = 1; i <= 5; i++) {
+      const imageUrl = question[`image_${i}`] || '';
+      // If URL starts with /images/, it's local, otherwise it's external
+      newImageSourceType[`image_${i}`] = imageUrl.startsWith('/images/') ? 'local' : 'url';
+    }
+    setImageSourceType(newImageSourceType);
+    
+    setEditingQuestion(question);
+    setShowQuestionForm(true);
+  };
+
+  const handleUpdateQuestion = async (e) => {
+    e.preventDefault();
+    if (!selectedSet || !editingQuestion) return;
+
+    try {
+      const response = await fetchAuthAPI(
+        `${API_URL}/api/question-sets/${selectedSet.id}/questions/${editingQuestion.day_number}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify(questionForm)
+        }
+      );
+
+      if (response.ok) {
+        await fetchQuestions(selectedSet.id);
+        await fetchQuestionSets();
+        resetQuestionForm();
+        setShowQuestionForm(false);
+      } else {
+        const errorData = await response.json();
+        setError(errorData.detail || 'Failed to update question');
+      }
+    } catch (err) {
+      console.error('Error updating question:', err);
+      setError('Failed to update question');
+    }
   };
 
   const handleDeleteQuestion = async (dayNumber) => {
@@ -331,16 +420,23 @@ function QuestionManager({ onBack }) {
 
                 {showQuestionForm && (
                   <form className="question-form" onSubmit={handleSaveQuestion}>
+                    <h3>{editingQuestion ? `Edit Question for Day ${editingQuestion.day_number}` : 'Add New Question'}</h3>
+                    
                     <div className="form-group">
                       <label>Day Number (1-24)</label>
                       <select
                         value={questionForm.day_number}
                         onChange={(e) => setQuestionForm({...questionForm, day_number: parseInt(e.target.value)})}
                         required
+                        disabled={editingQuestion !== null}
                       >
-                        {getAvailableDays().map(day => (
-                          <option key={day} value={day}>Day {day}</option>
-                        ))}
+                        {editingQuestion ? (
+                          <option value={questionForm.day_number}>Day {questionForm.day_number}</option>
+                        ) : (
+                          getAvailableDays().map(day => (
+                            <option key={day} value={day}>Day {day}</option>
+                          ))
+                        )}
                       </select>
                     </div>
 
@@ -368,19 +464,62 @@ function QuestionManager({ onBack }) {
 
                     <div className="form-group">
                       <label>Image URLs (Optional)</label>
+                      <p className="image-hint">Choose local images from the backend folder or enter external URLs</p>
                       {[1, 2, 3, 4, 5].map(num => (
-                        <input
-                          key={num}
-                          type="url"
-                          value={questionForm[`image_${num}`]}
-                          onChange={(e) => setQuestionForm({...questionForm, [`image_${num}`]: e.target.value})}
-                          placeholder={`Image ${num} URL`}
-                        />
+                        <div key={num} className="image-input-group">
+                          <div className="image-source-toggle">
+                            <label className="radio-label">
+                              <input
+                                type="radio"
+                                name={`image_${num}_source`}
+                                value="local"
+                                checked={imageSourceType[`image_${num}`] === 'local'}
+                                onChange={() => setImageSourceType({...imageSourceType, [`image_${num}`]: 'local'})}
+                              />
+                              <span>Local Image</span>
+                            </label>
+                            <label className="radio-label">
+                              <input
+                                type="radio"
+                                name={`image_${num}_source`}
+                                value="url"
+                                checked={imageSourceType[`image_${num}`] === 'url'}
+                                onChange={() => setImageSourceType({...imageSourceType, [`image_${num}`]: 'url'})}
+                              />
+                              <span>External URL</span>
+                            </label>
+                          </div>
+                          
+                          {imageSourceType[`image_${num}`] === 'local' ? (
+                            <select
+                              value={questionForm[`image_${num}`]}
+                              onChange={(e) => setQuestionForm({...questionForm, [`image_${num}`]: e.target.value})}
+                              className="image-select"
+                            >
+                              <option value="">-- Select Image {num} --</option>
+                              {availableImages.map(img => (
+                                <option key={img.name} value={img.url}>
+                                  {img.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="url"
+                              value={questionForm[`image_${num}`]}
+                              onChange={(e) => setQuestionForm({...questionForm, [`image_${num}`]: e.target.value})}
+                              placeholder={`Image ${num} external URL (https://...)`}
+                              className="image-url-input"
+                            />
+                          )}
+                        </div>
                       ))}
                     </div>
 
                     <div className="form-buttons">
-                      <button type="submit" className="save-btn">Save Question</button>
+                      <button type="submit" className="save-btn">
+                        {editingQuestion ? 'Update Question' : 'Save Question'}
+                      </button>
                       <button type="button" className="cancel-btn" onClick={() => {
                         setShowQuestionForm(false);
                         resetQuestionForm();
@@ -398,13 +537,22 @@ function QuestionManager({ onBack }) {
                         <div key={q.id} className="question-card">
                           <div className="question-card-header">
                             <div className="question-day">Day {q.day_number}</div>
-                            <button 
-                              className="delete-question-btn"
-                              onClick={() => handleDeleteQuestion(q.day_number)}
-                              title="Delete this question"
-                            >
-                              🗑️
-                            </button>
+                            <div className="question-card-actions">
+                              <button 
+                                className="edit-question-btn"
+                                onClick={() => handleEditQuestion(q)}
+                                title="Edit this question"
+                              >
+                                ✏️
+                              </button>
+                              <button 
+                                className="delete-question-btn"
+                                onClick={() => handleDeleteQuestion(q.day_number)}
+                                title="Delete this question"
+                              >
+                                🗑️
+                              </button>
+                            </div>
                           </div>
                           <div className="question-text">{q.question_text}</div>
                           <div className="question-answer">
