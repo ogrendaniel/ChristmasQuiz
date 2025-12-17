@@ -28,9 +28,37 @@ function WaitingRoom({ quizData, onStartQuiz }) {
   }, [quizData.quiz_id]);
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(quizData.join_link);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    // Try modern clipboard API first, fallback to older method
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(quizData.join_link)
+        .then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        })
+        .catch(() => {
+          // Fallback for HTTP (non-HTTPS) contexts
+          fallbackCopy();
+        });
+    } else {
+      fallbackCopy();
+    }
+  };
+
+  const fallbackCopy = () => {
+    const textArea = document.createElement('textarea');
+    textArea.value = quizData.join_link;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      alert('Copy failed. Please copy manually: ' + quizData.join_link);
+    }
+    document.body.removeChild(textArea);
   };
 
   const handleStartQuiz = async () => {
