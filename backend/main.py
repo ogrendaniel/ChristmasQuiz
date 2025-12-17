@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -39,16 +40,28 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 # Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://*.ngrok-free.app",  # Allow all ngrok URLs
-        "https://*.ngrok.io",
-        "*"  # Or add your specific ngrok URL here
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins (simplest for development with ngrok)
+    allow_credentials=False,  # Must be False when allow_origins is "*"
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+# Add middleware to handle OPTIONS requests explicitly
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Max-Age": "3600",
+            }
+        )
+    response = await call_next(request)
+    return response
 
 # Database setup
 DB_PATH = "quiz_database.db"
@@ -516,15 +529,14 @@ def create_quiz(quiz_data: Optional[QuizCreate] = None, user_data: dict = Depend
         "join_link": f"{FRONTEND_URL}/join/{quiz_id}"
     }
 
-@app.get("/api/quiz/{quiz_id}")
-def get_quiz(quiz_id: str):
-    """Get quiz details"""
+@app.get("/api/quiz/{quiz_id}/check")
+def check_quiz_exists(quiz_id: str):
+    """Public endpoint to check if a quiz exists (for join page)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT id, host_id, created_at, started
-        FROM quizzes WHERE id = ?
+        SELECT id, started FROM quizzes WHERE id = ?
     """, (quiz_id,))
     
     row = cursor.fetchone()
@@ -535,9 +547,36 @@ def get_quiz(quiz_id: str):
     
     return {
         "id": row[0],
-        "host_id": row[1],
+        "started": bool(row[1])
+    }
+
+@app.get("/api/quiz/{quiz_id}")
+def get_quiz(quiz_id: str, user_data: dict = Depends(verify_token)):
+    """Get quiz details - requires authentication and ownership"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT id, user_id, created_at, started, question_set_id
+        FROM quizzes WHERE id = ?
+    """, (quiz_id,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    
+    # Verify ownership
+    if row[1] != user_data["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied - not the quiz owner")
+    
+    return {
+        "quiz_id": row[0],
+        "user_id": row[1],
         "created_at": row[2],
-        "started": bool(row[3])
+        "started": bool(row[3]),
+        "question_set_id": row[4]
     }
 
 @app.post("/api/quiz/{quiz_id}/join")
@@ -619,8 +658,10 @@ def get_players(quiz_id: str):
     
     players = [
         {
-            "id": row[0],
-            "username": row[1],
+            "player_id": row[0],
+            "player_name": row[1],
+            "id": row[0],  # Keep for backward compatibility
+            "username": row[1],  # Keep for backward compatibility
             "score": row[2],
             "joined_at": row[3]
         }
@@ -1292,6 +1333,25 @@ def update_player_score(quiz_id: str, player_id: str, score_update: ScoreUpdate,
 class AnswerUpdate(BaseModel):
     is_correct: bool
     points_earned: int
+
+@app.get("/api/quiz/{quiz_id}/player/{player_id}/answer/{day_number}")
+def check_player_answer(quiz_id: str, player_id: str, day_number: int):
+    """Check if a player has answered a specific day"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT id FROM player_answers 
+        WHERE quiz_id = ? AND player_id = ? AND day_number = ?
+    """, (quiz_id, player_id, day_number))
+    
+    answer = cursor.fetchone()
+    conn.close()
+    
+    if answer:
+        return {"has_answered": True}
+    else:
+        raise HTTPException(status_code=404, detail="No answer found")
 
 @app.put("/api/quiz/{quiz_id}/player/{player_id}/answer/{day_number}")
 def update_player_answer(quiz_id: str, player_id: str, day_number: int, answer_update: AnswerUpdate, user_data: dict = Depends(verify_token)):

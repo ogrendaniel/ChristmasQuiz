@@ -11,7 +11,7 @@ function JoinPage({ quizId, onJoinSuccess }) {
     // Verify quiz exists
     const checkQuiz = async () => {
       try {
-        const response = await fetchAPI(`${API_URL}/api/quiz/${quizId}`);
+        const response = await fetchAPI(`${API_URL}/api/quiz/${quizId}/check`);
         if (response.ok) {
           const data = await response.json();
           // Quiz exists - allow joining/rejoining regardless of started status

@@ -1,6 +1,6 @@
 // API configuration
 // Backend ngrok URL - update this when ngrok URLs change
-export const API_URL = 'https://941823917f53.ngrok-free.app';
+export const API_URL = 'http://13.53.35.42';
 
 // Helper function for API calls that bypasses ngrok warning
 export const fetchAPI = (url, options = {}) => {
@@ -25,3 +25,5 @@ export const fetchAuthAPI = (url, options = {}) => {
     }
   });
 };
+
+

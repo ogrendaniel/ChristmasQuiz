@@ -10,6 +10,7 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
   const [showResult, setShowResult] = useState(false);
   const [result, setResult] = useState(null);
   const [imageUrls, setImageUrls] = useState([]);
+  const [playerStatus, setPlayerStatus] = useState([]);
 
   useEffect(() => {
     const fetchQuestion = async () => {
@@ -55,6 +56,43 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
       });
     };
   }, [dayNumber]);
+
+  // Separate useEffect for player status polling (host only)
+  useEffect(() => {
+    if (!isHost || !quizData?.quiz_id) return;
+
+    const fetchPlayerStatus = async () => {
+      try {
+        const response = await fetchAPI(`${API_URL}/api/quiz/${quizData.quiz_id}/players`);
+        if (response.ok) {
+          const data = await response.json();
+          // Check which players have answered this day
+          const statusPromises = data.players.map(async (player) => {
+            const answerResponse = await fetchAPI(
+              `${API_URL}/api/quiz/${quizData.quiz_id}/player/${player.player_id}/answer/${dayNumber}`
+            );
+            const hasAnswered = answerResponse.ok;
+            return {
+              name: player.player_name,
+              hasAnswered
+            };
+          });
+          const statuses = await Promise.all(statusPromises);
+          setPlayerStatus(statuses);
+        }
+      } catch (error) {
+        console.error('Error fetching player status:', error);
+      }
+    };
+
+    // Fetch immediately
+    fetchPlayerStatus();
+    
+    // Then poll every 3 seconds
+    const interval = setInterval(fetchPlayerStatus, 3000);
+    
+    return () => clearInterval(interval);
+  }, [isHost, quizData, dayNumber]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -180,11 +218,21 @@ function QuestionPage({ dayNumber, quizData, playerData, isHost, onBack }) {
 
           {isHost ? (
             <div className="host-view-only">
-              <p className="host-message">
-                🎅 <strong>Host View</strong> - You can see the question but cannot submit an answer.
-              </p>
-              <div className="question-preview">
-                <p><strong>Question:</strong> {question.question_text}</p>
+              <div className="player-status-section">
+                <h3>Player Answers Status</h3>
+                <div className="player-status-summary">
+                  {playerStatus.filter(p => p.hasAnswered).length} / {playerStatus.length} players have answered
+                </div>
+                <div className="player-status-list">
+                  {playerStatus.map((player, index) => (
+                    <div key={index} className={`player-status-item ${player.hasAnswered ? 'answered' : 'pending'}`}>
+                      <span className="player-name">{player.name}</span>
+                      <span className="status-icon">
+                        {player.hasAnswered ? '✅' : '⏳'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           ) : (

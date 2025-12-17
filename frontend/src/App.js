@@ -37,12 +37,26 @@ function App() {
       if (savedPlayerData) {
         const playerInfo = JSON.parse(savedPlayerData);
         if (playerInfo.quiz_id === quizId) {
-          // Restore player session
-          setPlayerData(playerInfo);
-          setQuizData({ quiz_id: quizId });
-          setIsHost(false);
-          setPage('quiz');
-          return;
+          // Check quiz status to determine which page to show
+          try {
+            const quizResponse = await fetchAPI(`${API_URL}/api/quiz/${quizId}/check`);
+            if (quizResponse.ok) {
+              const quizData = await quizResponse.json();
+              setPlayerData(playerInfo);
+              setQuizData({ quiz_id: quizId });
+              setIsHost(false);
+              
+              // If quiz has started, go to quiz page; otherwise, go to waiting room
+              if (quizData.started) {
+                setPage('quiz');
+              } else {
+                setPage('player-waiting');
+              }
+              return;
+            }
+          } catch (error) {
+            console.error('Error checking quiz status:', error);
+          }
         }
       }
       
@@ -68,21 +82,50 @@ function App() {
         // Check if returning to a hosted quiz AND the URL matches
         const savedQuizData = localStorage.getItem('quizData');
         const savedIsHost = localStorage.getItem('isHost');
-        const hostMatch = path.match(/^\/host\/([a-zA-Z0-9]+)$/);
+        const hostMatch = path.match(/^\/host\/([a-zA-Z0-9-]+)$/);
         
-        if (savedIsHost === 'true' && savedQuizData && hostMatch) {
-          const quizInfo = JSON.parse(savedQuizData);
-          // Only restore if the URL quiz ID matches the saved quiz ID
-          if (quizInfo.quiz_id === hostMatch[1]) {
-            setQuizData(quizInfo);
-            setIsHost(true);
-            setPage('quiz');
-          } else {
-            // URL doesn't match saved quiz, go to dashboard
+        if (hostMatch) {
+          const urlQuizId = hostMatch[1];
+          
+          // If we have saved quiz data and it matches, restore it
+          if (savedIsHost === 'true' && savedQuizData) {
+            const quizInfo = JSON.parse(savedQuizData);
+            if (quizInfo.quiz_id === urlQuizId) {
+              setQuizData(quizInfo);
+              setIsHost(true);
+              setPage('quiz');
+              return;
+            }
+          }
+          
+          // No saved data or doesn't match - fetch the quiz from server
+          try {
+            const quizResponse = await fetchAuthAPI(`${API_URL}/api/quiz/${urlQuizId}`);
+            if (quizResponse.ok) {
+              const quizData = await quizResponse.json();
+              setQuizData({ quiz_id: urlQuizId, ...quizData });
+              setIsHost(true);
+              setPage('quiz');
+              // Save to localStorage
+              localStorage.setItem('quizData', JSON.stringify({ quiz_id: urlQuizId, ...quizData }));
+              localStorage.setItem('isHost', 'true');
+              return;
+            } else {
+              // Quiz not found or not owned by user
+              console.error('Quiz not found or access denied');
+              setPage('dashboard');
+              window.history.pushState({}, '', '/');
+            }
+          } catch (error) {
+            console.error('Error fetching quiz:', error);
             setPage('dashboard');
             window.history.pushState({}, '', '/');
           }
+        } else if (path === '/' || path === '') {
+          // At root path, go to dashboard
+          setPage('dashboard');
         } else {
+          // Unknown path, redirect to dashboard
           setPage('dashboard');
           window.history.pushState({}, '', '/');
         }
@@ -148,10 +191,21 @@ function App() {
 
   const handleStartQuiz = () => {
     setPage('quiz');
+    // Maintain the URL for both host and player
+    if (isHost && quizData?.quiz_id) {
+      window.history.pushState({}, '', `/host/${quizData.quiz_id}`);
+    } else if (!isHost && playerData?.quiz_id) {
+      window.history.pushState({}, '', `/join/${playerData.quiz_id}`);
+    }
   };
 
   const handleBackToDashboard = () => {
     setPage('dashboard');
+    // Clear quiz data when explicitly going back to dashboard
+    localStorage.removeItem('quizData');
+    localStorage.removeItem('isHost');
+    setQuizData(null);
+    setIsHost(false);
     window.history.pushState({}, '', '/');
   };
 
@@ -240,11 +294,11 @@ function PlayerWaitingRoom({ playerData, onQuizStart }) {
   const [quizStarted, setQuizStarted] = useState(false);
 
   useEffect(() => {
-    // Poll to check if quiz has started
-    const interval = setInterval(async () => {
+    // Poll to check if quiz has started (using public endpoint)
+    const checkQuizStatus = async () => {
       try {
         const response = await fetchAPI(
-          `${API_URL}/api/quiz/${playerData.quiz_id}`
+          `${API_URL}/api/quiz/${playerData.quiz_id}/check`
         );
         const data = await response.json();
         if (data.started && !quizStarted) {
@@ -254,7 +308,10 @@ function PlayerWaitingRoom({ playerData, onQuizStart }) {
       } catch (error) {
         console.error('Error checking quiz status:', error);
       }
-    }, 2000);
+    };
+
+    checkQuizStatus(); // Check immediately
+    const interval = setInterval(checkQuizStatus, 2000); // Then every 2 seconds
     
     return () => clearInterval(interval);
   }, [playerData.quiz_id, quizStarted, onQuizStart]);
