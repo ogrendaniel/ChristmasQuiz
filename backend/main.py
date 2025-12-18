@@ -16,6 +16,7 @@ import jwt
 import ollama
 import re
 from pathlib import Path
+from answer_validator import validate_answer, get_validation_rule, ValidationRule
 
 # Load environment variables from .env file
 load_dotenv()
@@ -287,12 +288,33 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
             detail="Invalid token"
         )
 
-def check_answer_with_ai(player_answer: str, correct_answer: str) -> dict:
+def check_answer_with_ai(player_answer: str, correct_answer: str, day_number: int = None) -> dict:
     """
-    Use Ollama to check if player's answer matches the correct answer.
+    Check if player's answer matches the correct answer.
+    Uses rule-based validation first, with AI as fallback.
     Returns dict with: is_match (bool), confidence (int 0-100), reasoning (str), method (str)
     """
-    # First, check for exact match (fast path)
+    # Try rule-based validation first if we have a rule for this day
+    if day_number is not None:
+        validation_rule = get_validation_rule(day_number)
+        if validation_rule:
+            print(f"📋 RULE-BASED CHECK (Day {day_number}) - Player: '{player_answer}'")
+            result = validate_answer(player_answer, validation_rule)
+            
+            # If rule-based validation worked, return the result
+            if result is not None:
+                print(f"{'✓' if result['is_correct'] else '✗'} {result['reasoning']}")
+                return {
+                    "is_match": result["is_correct"],
+                    "confidence": result["confidence"],
+                    "reasoning": result["reasoning"],
+                    "method": result["method"]
+                }
+            
+            # If result is None, fall through to AI validation
+            print(f"⚠️ Rule returned None, falling back to AI for day {day_number}")
+    
+    # Fallback: check for exact match (fast path)
     is_exact = player_answer.strip().lower() == correct_answer.strip().lower()
     if is_exact:
         print(f"✓ EXACT MATCH - Player: '{player_answer}' | Correct: '{correct_answer}'")
@@ -304,7 +326,7 @@ def check_answer_with_ai(player_answer: str, correct_answer: str) -> dict:
         }
     
     # Not an exact match - check if AI is enabled
-    print(f"AI CHECK - Player: '{player_answer}' | Correct: '{correct_answer}' | USE_OLLAMA: {USE_OLLAMA}")
+    print(f"🤖 AI CHECK - Player: '{player_answer}' | Correct: '{correct_answer}' | USE_OLLAMA: {USE_OLLAMA}")
     
     if not USE_OLLAMA:
         # Ollama is disabled, return no match
@@ -1530,8 +1552,8 @@ def submit_answer(day_number: int, submission: AnswerSubmission):
     correct_answer = row[0]
     user_answer = submission.answer
     
-    # Use AI-powered answer checking
-    check_result = check_answer_with_ai(user_answer, correct_answer)
+    # Use rule-based validation first, then AI if needed
+    check_result = check_answer_with_ai(user_answer, correct_answer, day_number)
     is_correct = check_result["is_match"]
     points_earned = 10 if is_correct else 0
     

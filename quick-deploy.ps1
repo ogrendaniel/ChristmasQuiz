@@ -35,12 +35,21 @@ Write-Host ""
 # Copy backend files
 Write-Host "3. Uploading backend to AWS..." -ForegroundColor Cyan
 scp -i "$KeyFile" backend\main.py "$EC2User@$EC2IP`:~/ChristmasQuiz/backend/"
+scp -i "$KeyFile" backend\answer_validator.py "$EC2User@$EC2IP`:~/ChristmasQuiz/backend/"
 scp -i "$KeyFile" backend\add_sample_questions.py "$EC2User@$EC2IP`:~/ChristmasQuiz/backend/" 2>$null
 Write-Host "   Upload complete!" -ForegroundColor Green
 Write-Host ""
 
+# Copy images folder
+Write-Host "4. Uploading images to AWS..." -ForegroundColor Cyan
+ssh -i "$KeyFile" "$EC2User@$EC2IP" "mkdir -p ~/ChristmasQuiz/backend/images"
+scp -i "$KeyFile" -r backend\images\* "$EC2User@$EC2IP`:~/ChristmasQuiz/backend/images/" 2>$null
+ssh -i "$KeyFile" "$EC2User@$EC2IP" "chmod -R 755 ~/ChristmasQuiz/backend/images"
+Write-Host "   Upload complete!" -ForegroundColor Green
+Write-Host ""
+
 # Restart backend service
-Write-Host "4. Restarting backend service..." -ForegroundColor Cyan
+Write-Host "5. Restarting backend service..." -ForegroundColor Cyan
 ssh -i "$KeyFile" "$EC2User@$EC2IP" "sudo systemctl restart quiz-backend"
 Write-Host "   Service restarted!" -ForegroundColor Green
 Write-Host ""
