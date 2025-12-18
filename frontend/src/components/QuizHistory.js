@@ -14,6 +14,8 @@ function QuizHistory({ onBack }) {
   const [tempPoints, setTempPoints] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedPlayerModal, setSelectedPlayerModal] = useState(null);
+  const [loadingPlayerAnswers, setLoadingPlayerAnswers] = useState(false);
 
   useEffect(() => {
     fetchQuizHistory();
@@ -73,29 +75,34 @@ function QuizHistory({ onBack }) {
     setEditingAnswer(null);
   };
 
-  const togglePlayerAnswers = async (playerId) => {
-    if (expandedPlayer === playerId) {
-      setExpandedPlayer(null);
-      return;
-    }
-
-    setExpandedPlayer(playerId);
+  const openPlayerModal = async (player) => {
+    setSelectedPlayerModal(player);
+    setLoadingPlayerAnswers(true);
 
     // Fetch answers if not already loaded
-    if (!playerAnswers[playerId]) {
+    if (!playerAnswers[player.player_id]) {
       try {
-        const response = await fetchAuthAPI(`${API_URL}/api/quiz/${selectedQuiz}/player/${playerId}/answers`);
+        const response = await fetchAuthAPI(`${API_URL}/api/quiz/${selectedQuiz}/player/${player.player_id}/answers`);
         if (response.ok) {
           const data = await response.json();
-          setPlayerAnswers(prev => ({ ...prev, [playerId]: data.answers }));
+          setPlayerAnswers(prev => ({ ...prev, [player.player_id]: data.answers || [] }));
         } else {
-          setError('Failed to load player answers');
+          const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+          console.error('Error response:', response.status, errorData);
+          setError(`Failed to load player answers: ${errorData.detail || response.statusText}`);
         }
       } catch (err) {
         console.error('Error fetching player answers:', err);
-        setError('Failed to load player answers');
+        setError('Failed to load player answers: ' + err.message);
       }
     }
+    setLoadingPlayerAnswers(false);
+  };
+
+  const closePlayerModal = () => {
+    setSelectedPlayerModal(null);
+    setEditingAnswer(null);
+    setTempPoints('');
   };
 
   const startEditingScore = (playerId, currentScore) => {
@@ -371,42 +378,17 @@ function QuizHistory({ onBack }) {
                     {quizResults.players.map((player, index) => (
                       <div key={player.player_id} className="player-card">
                         <div 
-                          className={`player-row ${index === 0 ? 'first-place' : ''} ${expandedPlayer === player.player_id ? 'expanded' : ''}`}
-                          onClick={() => togglePlayerAnswers(player.player_id)}
+                          className={`player-row ${index === 0 ? 'first-place' : ''}`}
+                          onClick={() => openPlayerModal(player)}
                         >
                           <div className="player-rank">
                             {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
                           </div>
                           <div className="player-name">{player.username}</div>
                           <div className="player-stats">
-                            {editingScore === player.player_id ? (
-                              <div className="score-edit-inline" onClick={(e) => e.stopPropagation()}>
-                                <input
-                                  type="number"
-                                  value={tempScore}
-                                  onChange={(e) => setTempScore(e.target.value)}
-                                  className="score-input"
-                                  min="0"
-                                />
-                                <button className="save-btn" onClick={() => savePlayerScore(player.player_id)}>✓</button>
-                                <button className="cancel-btn" onClick={cancelEditingScore}>✗</button>
-                              </div>
-                            ) : (
-                              <>
-                                <span className="player-score">
-                                  {player.score} pts
-                                  <button 
-                                    className="edit-icon-btn"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      startEditingScore(player.player_id, player.score);
-                                    }}
-                                  >
-                                    ✏️
-                                  </button>
-                                </span>
-                              </>
-                            )}
+                            <span className="player-score">
+                              {player.score} pts
+                            </span>
                             <span className="player-answers">
                               {player.correct_answers}/{player.questions_answered} correct
                             </span>
@@ -417,100 +399,131 @@ function QuizHistory({ onBack }) {
                             </span>
                           </div>
                           <div className="expand-icon">
-                            {expandedPlayer === player.player_id ? '▼' : '▶'}
+                            👁️ View Details
                           </div>
                         </div>
-
-                        {/* Expanded answers section */}
-                        {expandedPlayer === player.player_id && (
-                          <div className="player-answers-details">
-                            {!playerAnswers[player.player_id] ? (
-                              <div className="loading-answers">Loading answers...</div>
-                            ) : playerAnswers[player.player_id].length === 0 ? (
-                              <div className="no-answers">No answers yet</div>
-                            ) : (
-                              <div className="answers-list">
-                                {playerAnswers[player.player_id].map((answer) => (
-                                  <div 
-                                    key={answer.day_number} 
-                                    className={`answer-row ${answer.is_correct ? 'correct' : 'incorrect'}`}
-                                  >
-                                    {/* Header with day number and status */}
-                                    <div className="answer-row-header">
-                                      <span className="col-day">Question #{answer.day_number}</span>
-                                      <span className={`status-badge ${answer.is_correct ? 'correct-badge' : 'incorrect-badge'}`}>
-                                        {answer.is_correct ? '✓ Correct' : '✗ Incorrect'}
-                                      </span>
-                                      {answer.ai_verified && (
-                                        <span 
-                                          className="ai-badge" 
-                                          title={`AI Verified (${answer.ai_confidence}% confidence)\n${answer.ai_reasoning}`}
-                                        >
-                                          🤖 AI {answer.ai_confidence}%
-                                        </span>
-                                      )}
-                                    </div>
-
-                                    {/* Content */}
-                                    <div className="answer-row-content">
-                                      {/* Question */}
-                                      <div className="answer-info-line">
-                                        <span className="answer-label">Question</span>
-                                        <span className="col-question">{answer.question_text}</span>
-                                      </div>
-
-                                      {/* Their Answer */}
-                                      <div className="answer-info-line">
-                                        <span className="answer-label">Their Answer</span>
-                                        <span className="col-answer">{answer.player_answer}</span>
-                                      </div>
-
-                                      {/* Correct Answer */}
-                                      <div className="answer-info-line">
-                                        <span className="answer-label">Correct Answer</span>
-                                        <span className="col-correct">{answer.correct_answer}</span>
-                                      </div>
-
-                                      {/* Points */}
-                                      <div className="answer-info-line">
-                                        <span className="answer-label">Points Earned</span>
-                                        <div className="col-points">
-                                          {editingAnswer === `${player.player_id}-${answer.day_number}` ? (
-                                            <div className="points-edit-inline">
-                                              <input
-                                                type="number"
-                                                value={tempPoints}
-                                                onChange={(e) => setTempPoints(e.target.value)}
-                                                className="points-input"
-                                                min="0"
-                                              />
-                                              <button className="save-btn-small" onClick={() => saveAnswerPoints(player.player_id, answer.day_number, answer.is_correct)}>✓</button>
-                                              <button className="cancel-btn-small" onClick={cancelEditingAnswer}>✗</button>
-                                            </div>
-                                          ) : (
-                                            <>
-                                              <span style={{fontSize: '1.2em', color: '#2f7d3f'}}>{answer.points_earned} pts</span>
-                                              <button 
-                                                className="edit-answer-btn"
-                                                onClick={() => startEditingAnswer(player.player_id, answer.day_number, answer.points_earned)}
-                                              >
-                                                Edit Points
-                                              </button>
-                                            </>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </div>
                     ))}
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Player Details Modal */}
+        {selectedPlayerModal && (
+          <div className="player-modal-overlay" onClick={closePlayerModal}>
+            <div className="player-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="player-modal-header">
+                <div className="player-modal-title">
+                  <h2>📝 {selectedPlayerModal.username}'s Answers</h2>
+                  <div className="player-modal-stats">
+                    <span className="modal-stat">
+                      <strong>Score:</strong> {selectedPlayerModal.score} pts
+                    </span>
+                    <span className="modal-stat">
+                      <strong>Correct:</strong> {selectedPlayerModal.correct_answers}/{selectedPlayerModal.questions_answered}
+                    </span>
+                    <span className="modal-stat">
+                      <strong>Accuracy:</strong> {selectedPlayerModal.questions_answered > 0
+                        ? Math.round((selectedPlayerModal.correct_answers / selectedPlayerModal.questions_answered) * 100)
+                        : 0}%
+                    </span>
+                  </div>
+                </div>
+                <button className="modal-close-btn" onClick={closePlayerModal}>✕</button>
+              </div>
+
+              <div className="player-modal-content">
+                {loadingPlayerAnswers ? (
+                  <div className="modal-loading">
+                    <div className="loading-spinner"></div>
+                    <p>Loading answers...</p>
+                  </div>
+                ) : !playerAnswers[selectedPlayerModal.player_id] || playerAnswers[selectedPlayerModal.player_id].length === 0 ? (
+                  <div className="modal-no-answers">
+                    <p>🎄 No answers submitted yet</p>
+                  </div>
+                ) : (
+                  <div className="modal-answers-grid">
+                    {playerAnswers[selectedPlayerModal.player_id].map((answer) => (
+                      <div 
+                        key={answer.day_number} 
+                        className={`modal-answer-card ${answer.is_correct ? 'card-correct' : 'card-incorrect'}`}
+                      >
+                        <div className="modal-answer-header">
+                          <span className="modal-question-num">Question #{answer.day_number}</span>
+                          <span className={`modal-status-badge ${answer.is_correct ? 'badge-correct' : 'badge-incorrect'}`}>
+                            {answer.is_correct ? '✓ Correct' : '✗ Incorrect'}
+                          </span>
+                        </div>
+
+                        <div className="modal-answer-body">
+                          <div className="modal-answer-section">
+                            <span className="modal-label">Question:</span>
+                            <p className="modal-question-text">{answer.question_text}</p>
+                          </div>
+
+                          <div className="modal-answer-section">
+                            <span className="modal-label">Their Answer:</span>
+                            <p className={`modal-player-answer ${!answer.is_correct ? 'wrong-answer' : ''}`}>
+                              {answer.player_answer}
+                            </p>
+                          </div>
+
+                          {!answer.is_correct && (
+                            <div className="modal-answer-section">
+                              <span className="modal-label">Correct Answer:</span>
+                              <p className="modal-correct-answer">{answer.correct_answer}</p>
+                            </div>
+                          )}
+
+                          {answer.ai_verified && (
+                            <div className="modal-ai-info">
+                              <span className="modal-ai-badge">
+                                🤖 AI Verified ({answer.ai_confidence}% confidence)
+                              </span>
+                              <p className="modal-ai-reasoning">{answer.ai_reasoning}</p>
+                            </div>
+                          )}
+
+                          <div className="modal-answer-section modal-points-section">
+                            <span className="modal-label">Points:</span>
+                            {editingAnswer === `${selectedPlayerModal.player_id}-${answer.day_number}` ? (
+                              <div className="modal-points-edit">
+                                <input
+                                  type="number"
+                                  value={tempPoints}
+                                  onChange={(e) => setTempPoints(e.target.value)}
+                                  className="modal-points-input"
+                                  min="0"
+                                  max="10"
+                                />
+                                <button className="modal-save-btn" onClick={() => saveAnswerPoints(selectedPlayerModal.player_id, answer.day_number, answer.is_correct)}>
+                                  ✓ Save
+                                </button>
+                                <button className="modal-cancel-btn" onClick={cancelEditingAnswer}>
+                                  ✗ Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="modal-points-display">
+                                <span className="modal-points-value">{answer.points_earned} pts</span>
+                                <button 
+                                  className="modal-edit-points-btn"
+                                  onClick={() => startEditingAnswer(selectedPlayerModal.player_id, answer.day_number, answer.points_earned)}
+                                >
+                                  ✏️ Edit Points
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

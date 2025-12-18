@@ -201,6 +201,37 @@ def init_db():
         )
     """)
     
+    # Migration: Add missing columns to existing player_answers table if they don't exist
+    try:
+        cursor.execute("SELECT answered_at FROM player_answers LIMIT 1")
+    except sqlite3.OperationalError:
+        # Column doesn't exist, add it
+        print("Migrating database: Adding answered_at column to player_answers table")
+        cursor.execute("ALTER TABLE player_answers ADD COLUMN answered_at TIMESTAMP")
+        # Update existing rows with current timestamp
+        cursor.execute("UPDATE player_answers SET answered_at = CURRENT_TIMESTAMP WHERE answered_at IS NULL")
+    
+    try:
+        cursor.execute("SELECT ai_verified FROM player_answers LIMIT 1")
+    except sqlite3.OperationalError:
+        # Column doesn't exist, add it
+        print("Migrating database: Adding ai_verified column to player_answers table")
+        cursor.execute("ALTER TABLE player_answers ADD COLUMN ai_verified BOOLEAN DEFAULT 0")
+    
+    try:
+        cursor.execute("SELECT ai_confidence FROM player_answers LIMIT 1")
+    except sqlite3.OperationalError:
+        # Column doesn't exist, add it
+        print("Migrating database: Adding ai_confidence column to player_answers table")
+        cursor.execute("ALTER TABLE player_answers ADD COLUMN ai_confidence INTEGER")
+    
+    try:
+        cursor.execute("SELECT ai_reasoning FROM player_answers LIMIT 1")
+    except sqlite3.OperationalError:
+        # Column doesn't exist, add it
+        print("Migrating database: Adding ai_reasoning column to player_answers table")
+        cursor.execute("ALTER TABLE player_answers ADD COLUMN ai_reasoning TEXT")
+    
     conn.commit()
     conn.close()
 
@@ -1262,57 +1293,69 @@ def get_quiz_results(quiz_id: str, user_data: dict = Depends(verify_token)):
 @app.get("/api/quiz/{quiz_id}/player/{player_id}/answers")
 def get_player_answers(quiz_id: str, player_id: str, user_data: dict = Depends(verify_token)):
     """Get all answers for a specific player in a quiz"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Verify the quiz belongs to the user
-    cursor.execute("""
-        SELECT id, question_set_id FROM quizzes WHERE id = ? AND user_id = ?
-    """, (quiz_id, user_data["user_id"]))
-    
-    quiz_row = cursor.fetchone()
-    if not quiz_row:
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Verify the quiz belongs to the user
+        cursor.execute("""
+            SELECT id, question_set_id FROM quizzes WHERE id = ? AND user_id = ?
+        """, (quiz_id, user_data["user_id"]))
+        
+        quiz_row = cursor.fetchone()
+        if not quiz_row:
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Quiz not found"
+            )
+        
+        question_set_id = quiz_row[1]
+        
+        # Get player answers with question details
+        cursor.execute("""
+            SELECT pa.day_number, pa.answer, pa.is_correct, pa.points_earned, pa.answered_at,
+                   COALESCE(cq.question_text, q.question_text) as question_text,
+                   COALESCE(cq.correct_answer, q.correct_answer) as correct_answer,
+                   pa.ai_verified, pa.ai_confidence, pa.ai_reasoning
+            FROM player_answers pa
+            LEFT JOIN custom_questions cq ON pa.day_number = cq.day_number AND cq.question_set_id = ?
+            LEFT JOIN questions q ON pa.day_number = q.day_number
+            WHERE pa.player_id = ? AND pa.quiz_id = ?
+            ORDER BY pa.day_number
+        """, (question_set_id, player_id, quiz_id))
+        
+        rows = cursor.fetchall()
         conn.close()
+        
+        answers = [
+            {
+                "day_number": row[0],
+                "player_answer": row[1],
+                "is_correct": bool(row[2]),
+                "points_earned": row[3],
+                "answered_at": row[4],
+                "question_text": row[5],
+                "correct_answer": row[6],
+                "ai_verified": bool(row[7]) if row[7] is not None else False,
+                "ai_confidence": row[8],
+                "ai_reasoning": row[9]
+            }
+            for row in rows
+        ]
+        
+        return {"answers": answers}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_player_answers: {str(e)}")
+        print(f"Quiz ID: {quiz_id}, Player ID: {player_id}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Quiz not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
         )
-    
-    question_set_id = quiz_row[1]
-    
-    # Get player answers with question details
-    cursor.execute("""
-        SELECT pa.day_number, pa.answer, pa.is_correct, pa.points_earned, pa.answered_at,
-               COALESCE(cq.question_text, q.question_text) as question_text,
-               COALESCE(cq.correct_answer, q.correct_answer) as correct_answer,
-               pa.ai_verified, pa.ai_confidence, pa.ai_reasoning
-        FROM player_answers pa
-        LEFT JOIN custom_questions cq ON pa.day_number = cq.day_number AND cq.question_set_id = ?
-        LEFT JOIN questions q ON pa.day_number = q.day_number
-        WHERE pa.player_id = ? AND pa.quiz_id = ?
-        ORDER BY pa.day_number
-    """, (question_set_id, player_id, quiz_id))
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
-    answers = [
-        {
-            "day_number": row[0],
-            "player_answer": row[1],
-            "is_correct": bool(row[2]),
-            "points_earned": row[3],
-            "answered_at": row[4],
-            "question_text": row[5],
-            "correct_answer": row[6],
-            "ai_verified": bool(row[7]) if row[7] is not None else False,
-            "ai_confidence": row[8],
-            "ai_reasoning": row[9]
-        }
-        for row in rows
-    ]
-    
-    return {"answers": answers}
 
 class ScoreUpdate(BaseModel):
     score: int
